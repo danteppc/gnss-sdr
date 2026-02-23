@@ -46,6 +46,8 @@ public:
     void update_nav_data(const std::multimap<uint32_t, Tag>& tags_verified, uint8_t tag_size);
     bool have_nav_data(const std::string& nav_bits, uint32_t PRNd, uint32_t TOW);
     std::vector<OSNMA_NavData> get_verified_data();
+    void reset_verified_data();
+    void reset_all_nav_data();
 
 private:
     std::map<uint32_t, std::map<uint32_t, OSNMA_NavData>> d_satellite_nav_data{};  // NavData sorted by [PRNd][TOW_start]

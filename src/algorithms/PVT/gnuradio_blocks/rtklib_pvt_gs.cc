@@ -1677,7 +1677,17 @@ void rtklib_pvt_gs::msg_handler_osnma(const pmt::pmt_t& msg)
             if (msg_type_hash_code == typeid(std::shared_ptr<OSNMA_NavData>).hash_code())
                 {
                     const auto osnma_data = wht::any_cast<std::shared_ptr<OSNMA_NavData>>(pmt::any_ref(msg));
-                    d_auth_nav_data_map[osnma_data->get_prn_d()].insert(osnma_data->get_IOD_nav());
+                    if (osnma_data->get_reset_auth_map())
+                        {
+                            // Clear all authenticated navigation data due to time constraint violation
+                            d_auth_nav_data_map.clear();
+                            LOG(WARNING) << "PVT: Authentication map cleared due to OSNMA time constraint violation";
+                            std::cerr << "PVT: Authentication map cleared due to OSNMA time constraint violation" << std::endl;
+                        }
+                    else
+                        {
+                            d_auth_nav_data_map[osnma_data->get_prn_d()].insert(osnma_data->get_IOD_nav());
+                        }
                 }
         }
     catch (const wht::bad_any_cast& e)

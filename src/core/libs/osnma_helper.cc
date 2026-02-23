@@ -54,6 +54,25 @@ uint32_t Osnma_Helper::compute_gst(tm& input)
 
 uint32_t Osnma_Helper::compute_gst_now()
 {
+    // GST epoch start: 22 August 1999, 00:00:00 UTC
+    static const time_t GST_EPOCH = 935280000; // seconds since 1970-01-01 UTC
+
+    // Get current time in UTC (seconds since 1970)
+    time_t now = time(nullptr);
+
+    // Current GST: offset by 18 seconds (as of 2026)
+    time_t gst_seconds = now - GST_EPOCH + 18;
+
+    const uint32_t sec_in_week = 604800;
+    uint32_t week_number = gst_seconds / sec_in_week;
+    uint32_t time_of_week = gst_seconds % sec_in_week;
+
+    return compute_gst(week_number, time_of_week);
+}
+
+/*
+uint32_t Osnma_Helper::compute_gst_now()
+{
     time_t now = time(nullptr);
     struct tm local_tm = *std::localtime(&now);
     struct tm utc_tm = *std::gmtime(&now);
@@ -66,7 +85,7 @@ uint32_t Osnma_Helper::compute_gst_now()
     return compute_gst(week_number, time_of_week);
 }
 
-
+*/
 std::vector<uint8_t> Osnma_Helper::gst_to_uint8(uint32_t GST) const
 {
     std::vector<uint8_t> res;

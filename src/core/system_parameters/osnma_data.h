@@ -145,6 +145,7 @@ public:
     uint32_t get_IOD_nav() const { return IOD_nav; }
     uint32_t get_last_received_TOW() const { return d_last_received_TOW; }
     uint32_t get_tow_sf0() const { return d_TOW_sf0; }
+    bool get_reset_auth_map() const { return reset_auth_map; }
     bool have_this_bits(std::string nav_data);
     bool get_verified_status() const { return verified; }
     bool add_nav_data(const std::string& nav_data);
@@ -155,8 +156,10 @@ public:
     void set_prn_d(uint32_t value) { PRNd = value; }
     void set_last_received_TOW(uint32_t TOW) { d_last_received_TOW = TOW; };
     void set_update_verified_bits(uint32_t morebits) { verified_bits += morebits; }
+    void reset_verified_bits() { verified_bits = 0; }
     void set_verified_status(bool value) { verified = value; }
     void set_IOD_nav(uint32_t value) { IOD_nav = value; }
+    void set_reset_auth_map(bool value) { reset_auth_map = value; }
 
 private:
     static uint32_t id_counter;
@@ -168,6 +171,7 @@ private:
     uint32_t verified_bits{0};
     uint32_t IOD_nav{0};
     bool verified{false};
+    bool reset_auth_map{false};
 };
 
 

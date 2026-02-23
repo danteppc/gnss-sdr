@@ -320,3 +320,23 @@ void OSNMA_NavDataManager::log_status() const
                 }
         }
 }
+
+
+void OSNMA_NavDataManager::reset_verified_data()
+{
+    for (auto& satellite : d_satellite_nav_data)
+        {
+            for (auto& tow_data : satellite.second)
+                {
+                    d_satellite_nav_data[satellite.first][tow_data.first].reset_verified_bits();
+                    d_satellite_nav_data[satellite.first][tow_data.first].set_verified_status(false);
+                }
+        }
+}
+
+
+void OSNMA_NavDataManager::reset_all_nav_data()
+{
+    d_satellite_nav_data.clear();
+    LOG(INFO) << "Galileo OSNMA: All navigation data cleared (reset to initial state)";
+}
