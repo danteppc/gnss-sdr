@@ -46,9 +46,9 @@ public:
 
     size_t it_size{sizeof(gr_complex)};
 
-    float doppler_step{250.0};
     float samples_per_ms{0.0};
     float doppler_step2{125.0};
+    float threshold{0.0};
     float pfa{0.0};
     float pfa2{0.0};
     float samples_per_code{0.0};
@@ -64,6 +64,7 @@ public:
     uint32_t dump_channel{0U};
     int32_t doppler_max{5000};
     int32_t doppler_min{-5000};
+    int32_t doppler_step{500};
 
     bool bit_transition_flag{false};
     bool use_CFAR_algorithm_flag{true};
@@ -73,6 +74,11 @@ public:
     bool make_2_steps{false};
     bool use_automatic_resampler{false};
     bool enable_monitor_output{false};
+
+    // Not part of the configuration interface
+    uint32_t num_codes{0};
+    uint32_t code_length{0};
+    uint32_t vector_length{0};
 
 private:
     void SetDerivedParams();

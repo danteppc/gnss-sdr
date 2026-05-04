@@ -60,7 +60,8 @@ FileSourceBase::FileSourceBase(ConfigurationInterface const* configuration, std:
       is_complex_(false),
       repeat_(configuration->property(role_ + ".repeat"s, false)),
       enable_throttle_control_(configuration->property(role_ + ".enable_throttle_control"s, false)),
-      dump_(configuration->property(role_ + ".dump"s, false))
+      dump_(configuration->property(role_ + ".dump"s, false)),
+      sensor_data_source_configuration_(configuration)
 {
     minimum_tail_s_ = std::max(configuration->property("Acquisition_1C.coherent_integration_time_ms", 0.0) * 0.001 * 2.0, minimum_tail_s_);
     minimum_tail_s_ = std::max(configuration->property("Acquisition_2S.coherent_integration_time_ms", 0.0) * 0.001 * 2.0, minimum_tail_s_);
@@ -157,6 +158,7 @@ void FileSourceBase::init()
     create_throttle();
     create_valve();
     create_sink();
+    create_sensor_data_source();
 }
 
 
@@ -201,8 +203,16 @@ void FileSourceBase::connect(gr::top_block_sptr top_block)
     // DUMP
     if (sink())
         {
-            top_block->connect(std::move(output), 0, sink(), 0);
+            top_block->connect(output, 0, sink(), 0);
             DLOG(INFO) << "connected output to file sink";
+        }
+
+    // SENSOR DATA
+    if (sensor_data_source())
+        {
+            top_block->connect(output, 0, sensor_data_source(), 0);
+            DLOG(INFO) << "connected output to sensor data source, which now becomes the new output";
+            output = sensor_data_source();
         }
 
     post_connect_hook(std::move(top_block));
@@ -249,8 +259,16 @@ void FileSourceBase::disconnect(gr::top_block_sptr top_block)
     // DUMP
     if (sink())
         {
-            top_block->disconnect(std::move(output), 0, sink(), 0);
+            top_block->disconnect(output, 0, sink(), 0);
             DLOG(INFO) << "disconnected output to file sink";
+        }
+
+    // SENSOR DATA
+    if (sensor_data_source())
+        {
+            top_block->disconnect(output, 0, sensor_data_source(), 0);
+            DLOG(INFO) << "disconnected output to extra data source";
+            output = sensor_data_source();
         }
 
     post_disconnect_hook(std::move(top_block));
@@ -259,7 +277,6 @@ void FileSourceBase::disconnect(gr::top_block_sptr top_block)
 
 gr::basic_block_sptr FileSourceBase::get_left_block()
 {
-    // TODO: is this right? Shouldn't the left block be a nullptr?
     LOG(WARNING) << "Left block of a signal source should not be retrieved";
     return gr::blocks::file_source::sptr();
 }
@@ -270,6 +287,7 @@ gr::basic_block_sptr FileSourceBase::get_right_block()
     // clang-tidy wants braces around the if-conditions. clang-format wants to break the braces into
     // multiple line blocks. It's much more readable this way
     // clang-format off
+    if (sensor_data_source_) { return sensor_data_source_; }
     if (valve_) { return valve_; }
     if (throttle_) { return throttle_; }
     return source();
@@ -365,16 +383,16 @@ std::tuple<size_t, bool> FileSourceBase::itemTypeToSize()
 double FileSourceBase::packetsPerSample() const { return 1.0; }
 
 
-size_t FileSourceBase::samplesToSkip() const
+uint64_t FileSourceBase::samplesToSkip() const
 {
-    auto samples_to_skip = size_t(0);
+    auto samples_to_skip = uint64_t(0);
 
     if (seconds_to_skip_ > 0)
         {
             // sampling_frequency is in terms of actual samples (output packets). If this source is
             // compressed, there may be multiple packets per file (read) sample. First compute the
             // actual number of samples to skip (function of time and sample rate)
-            samples_to_skip = static_cast<size_t>(seconds_to_skip_ * sampling_frequency_);
+            samples_to_skip = static_cast<uint64_t>(seconds_to_skip_ * sampling_frequency_);
 
             // convert from sample to input items, scaling this value to input item space
             // (rounding up)
@@ -396,7 +414,7 @@ size_t FileSourceBase::samplesToSkip() const
 }
 
 
-size_t FileSourceBase::computeSamplesInFile() const
+uint64_t FileSourceBase::computeSamplesInFile() const
 {
     auto n_samples = samples();
 
@@ -410,7 +428,7 @@ size_t FileSourceBase::computeSamplesInFile() const
      * A possible solution is to compute the file length in samples using file size, excluding at least
      * the last 2 milliseconds, and enable always the valve block
      */
-    const auto tail = static_cast<size_t>(std::ceil(minimum_tail_s_ * sampling_frequency()));
+    const auto tail = static_cast<uint64_t>(std::ceil(minimum_tail_s_ * sampling_frequency()));
 
     if (tail > size)
         {
@@ -478,6 +496,7 @@ gnss_shared_ptr<gr::block> FileSourceBase::file_source() const { return file_sou
 gnss_shared_ptr<gr::block> FileSourceBase::valve() const { return valve_; }
 gnss_shared_ptr<gr::block> FileSourceBase::throttle() const { return throttle_; }
 gnss_shared_ptr<gr::block> FileSourceBase::sink() const { return sink_; }
+SensorDataSource::sptr FileSourceBase::sensor_data_source() const { return sensor_data_source_; }
 
 
 gr::blocks::file_source::sptr FileSourceBase::create_file_source()
@@ -572,6 +591,22 @@ gr::blocks::file_sink::sptr FileSourceBase::create_sink()
             create_sink_hook();
         }
     return sink_;
+}
+
+SensorDataSource::sptr FileSourceBase::create_sensor_data_source()
+{
+    if (sensor_data_source_configuration_.is_enabled())
+        {
+            if (is_complex_)
+                {
+                    sensor_data_source_configuration_.set_items_per_sample(2);
+                }
+            sensor_data_source_ = gnss_make_shared<SensorDataSource>(
+                sensor_data_source_configuration_,
+                gr::io_signature::make(1, 1, item_size_));
+            DLOG(INFO) << "sensor_data_source(" << sensor_data_source_->unique_id() << ")";
+        }
+    return sensor_data_source_;
 }
 
 

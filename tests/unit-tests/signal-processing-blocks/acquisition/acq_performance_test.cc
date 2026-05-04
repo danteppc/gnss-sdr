@@ -171,7 +171,7 @@ AcqPerfTest_msg_rx::AcqPerfTest_msg_rx(Concurrent_Queue<int>& queue) : gr::block
     this->message_port_register_in(pmt::mp("events"));
     this->set_msg_handler(pmt::mp("events"),
 #if HAS_GENERIC_LAMBDA
-        [this](auto&& PH1) { msg_handler_channel_events(PH1); });
+        [this](auto&& PH1) { msg_handler_channel_events(std::forward<decltype(PH1)>(PH1)); });
 #else
 #if USE_BOOST_BIND_PLACEHOLDERS
         boost::bind(&AcqPerfTest_msg_rx::msg_handler_channel_events, this, boost::placeholders::_1));
@@ -593,7 +593,6 @@ void AcquisitionPerformanceTest::process_message()
 {
     measurement_counter++;
     acquisition->reset();
-    acquisition->set_state(1);
     std::cout << "Progress: " << round(static_cast<float>(measurement_counter) / static_cast<float>(num_of_measurements) * 100.0) << "% \r" << std::flush;
     if (measurement_counter == num_of_measurements)
         {
@@ -854,16 +853,10 @@ int AcquisitionPerformanceTest::run_receiver()
 
     acquisition->set_gnss_synchro(&gnss_synchro);
     acquisition->set_channel(0);
-    acquisition->set_doppler_max(config->property("Acquisition.doppler_max", 10000));
-    acquisition->set_doppler_step(config->property("Acquisition.doppler_step", 500));
-    acquisition->set_threshold(config->property("Acquisition.threshold", 0.0));
-    acquisition->init();
     acquisition->set_local_code();
-
-    acquisition->set_state(1);  // Ensure that acquisition starts at the first sample
+    acquisition->reset();
     acquisition->connect(top_block);
 
-    acquisition->reset();
     top_block->connect(file_source, 0, gr_interleaved_char_to_complex, 0);
     top_block->connect(gr_interleaved_char_to_complex, 0, skiphead, 0);
     top_block->connect(skiphead, 0, valve, 0);

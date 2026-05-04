@@ -37,6 +37,7 @@
 #include <pmt/pmt.h>
 #include <chrono>
 #include <thread>
+#include <utility>
 #if HAS_GENERIC_LAMBDA
 #else
 #include <boost/bind/bind.hpp>
@@ -101,7 +102,7 @@ GlonassL2CaPcpsAcquisitionTest_msg_rx::GlonassL2CaPcpsAcquisitionTest_msg_rx(con
     this->message_port_register_in(pmt::mp("events"));
     this->set_msg_handler(pmt::mp("events"),
 #if HAS_GENERIC_LAMBDA
-        [this](auto&& PH1) { msg_handler_channel_events(PH1); });
+        [this](auto&& PH1) { msg_handler_channel_events(std::forward<decltype(PH1)>(PH1)); });
 #else
 #if USE_BOOST_BIND_PLACEHOLDERS
         boost::bind(&GlonassL2CaPcpsAcquisitionTest_msg_rx::msg_handler_channel_events, this, boost::placeholders::_1));
@@ -258,7 +259,7 @@ void GlonassL2CaPcpsAcquisitionTest::config_1()
         std::to_string(integration_time_ms));
     config->set_property("Acquisition_2G.max_dwells", "1");
     config->set_property("Acquisition_2G.implementation", "GLONASS_L2_CA_PCPS_Acquisition");
-    config->set_property("Acquisition_2G.threshold", "0.8");
+    config->set_property("Acquisition_2G.threshold", "0.0005");
     config->set_property("Acquisition_2G.doppler_max", "10000");
     config->set_property("Acquisition_2G.doppler_step", "250");
     config->set_property("Acquisition_2G.bit_transition_flag", "false");
@@ -489,23 +490,9 @@ TEST_F(GlonassL2CaPcpsAcquisitionTest, ValidationOfResults)
     }) << "Failure setting gnss_synchro.";
 
     ASSERT_NO_THROW({
-        acquisition->set_doppler_max(10000);
-    }) << "Failure setting doppler_max.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_doppler_step(500);
-    }) << "Failure setting doppler_step.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_threshold(0.0005);
-    }) << "Failure setting threshold.";
-
-    ASSERT_NO_THROW({
         acquisition->connect(top_block);
         top_block->msg_connect(acquisition->get_right_block(), pmt::mp("events"), msg_rx, pmt::mp("events"));
     }) << "Failure connecting acquisition to the top_block.";
-
-    acquisition->init();
 
     ASSERT_NO_THROW({
         std::shared_ptr<GNSSBlockInterface> signal_generator = std::make_shared<SignalGenerator>(config.get(), "SignalSource", 0, 1, queue.get());
@@ -531,7 +518,7 @@ TEST_F(GlonassL2CaPcpsAcquisitionTest, ValidationOfResults)
                 }
 
             acquisition->set_local_code();
-            acquisition->set_state(1);  // Ensure that acquisition starts at the first sample
+            acquisition->reset();
             start_queue();
 
             EXPECT_NO_THROW({
@@ -575,23 +562,9 @@ TEST_F(GlonassL2CaPcpsAcquisitionTest, ValidationOfResultsProbabilities)
     }) << "Failure setting gnss_synchro.";
 
     ASSERT_NO_THROW({
-        acquisition->set_doppler_max(config->property("Acquisition_2G.doppler_max", 10000));
-    }) << "Failure setting doppler_max.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_doppler_step(config->property("Acquisition_2G.doppler_step", 500));
-    }) << "Failure setting doppler_step.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_threshold(config->property("Acquisition_2G.threshold", 0.0));
-    }) << "Failure setting threshold.";
-
-    ASSERT_NO_THROW({
         acquisition->connect(top_block);
         top_block->msg_connect(acquisition->get_right_block(), pmt::mp("events"), msg_rx, pmt::mp("events"));
     }) << "Failure connecting acquisition to the top_block.";
-
-    acquisition->init();
 
     ASSERT_NO_THROW({
         std::shared_ptr<GNSSBlockInterface> signal_generator = std::make_shared<SignalGenerator>(config.get(), "SignalSource", 0, 1, queue.get());

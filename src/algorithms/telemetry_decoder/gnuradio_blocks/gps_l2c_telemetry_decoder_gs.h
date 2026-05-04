@@ -18,18 +18,11 @@
 #define GNSS_SDR_GPS_L2C_TELEMETRY_DECODER_GS_H
 
 
-#include "gnss_block_interface.h"
-#include "gnss_satellite.h"
 #include "gps_cnav_navigation_message.h"
 #include "nav_message_packet.h"
+#include "telemetry_impl_interface.h"
 #include "tlm_conf.h"
-#include "tlm_crc_stats.h"
-#include <gnuradio/block.h>
 #include <gnuradio/types.h>  // for gr_vector_const_void_star
-#include <cstdint>
-#include <fstream>
-#include <memory>  // for std::unique_ptr
-#include <string>
 
 extern "C"
 {
@@ -53,13 +46,13 @@ gps_l2c_telemetry_decoder_gs_sptr gps_l2c_make_telemetry_decoder_gs(
 /*!
  * \brief This class implements a block that decodes CNAV data defined in IS-GPS-200M
  */
-class gps_l2c_telemetry_decoder_gs : public gr::block
+class gps_l2c_telemetry_decoder_gs : public telemetry_impl_interface
 {
 public:
     ~gps_l2c_telemetry_decoder_gs() override;
-    void set_satellite(const Gnss_Satellite &satellite);  //!< Set satellite PRN
-    void set_channel(int32_t channel);                    //!< Set receiver's channel
-    void reset();
+    void set_satellite(const Gnss_Satellite &satellite) override;  //!< Set satellite PRN
+    void set_channel(int32_t channel) override;                    //!< Set receiver's channel
+    void reset() override;
 
     /*!
      * \brief This is where all signal processing takes place
@@ -104,6 +97,7 @@ private:
     bool d_remove_dat;
     bool d_enable_navdata_monitor;
     bool d_dump_crc_stats;
+    bool d_tow_to_trk;
 };
 
 

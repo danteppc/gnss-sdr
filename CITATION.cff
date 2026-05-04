@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# SPDX-FileCopyrightText: 2024-2025 C. Fernandez-Prades carles.fernandez(at)cttc.es
+# SPDX-FileCopyrightText: 2024-2026 C. Fernandez-Prades carles.fernandez(at)cttc.es
 ---
 authors:
   - affiliation: "Centre Tecnològic de Telecomunicacions de Catalunya (CTTC)"
@@ -25,6 +25,10 @@ authors:
     email: xavier.guerrero@cttc.es
     family-names: Guerrero
     given-names: Xavier
+  - alias: BigTurtle8
+    email: mvala079@gmail.com
+    family-names: Alagar
+    given-names: Marcus
   - alias: Gastd
     email: gabriel.araujo.5000@gmail.com
     family-names: Araujo
@@ -58,6 +62,9 @@ authors:
   - email: fabra@ice.csic.es
     family-names: Fabra
     given-names: Fran
+  - email: favreau.mathieu@hotmail.com
+    family-names: Favreau
+    given-names: Mathieu
   - email: daniel.co@bluewin.ch
     family-names: Fehr
     given-names: Daniel
@@ -102,6 +109,10 @@ authors:
     email: into.paakkonen@aalto.fi
     family-names: "Pääkkönen"
     given-names: Into
+  - alias: pedromiguelcp
+    email: pereirapedrocp@gmail.com
+    given-names: Pedro
+    family-names: Pereira
   - alias: Perrielornitorrinco
     affiliation: "Instituto Nacional de Técnica Aeroespacial"
     email: iperrie@inta.es
@@ -134,7 +145,7 @@ authors:
     family-names: "van der Linden"
     given-names: Stefan
 cff-version: "1.2.0"
-date-released: "2025-04-01"
+date-released: "2026-04-14"
 identifiers:
   - description: "The concept DOI of the work. This is a DOI always pointing to the latest stable release."
     type: doi
@@ -342,4 +353,4 @@ repository-code: "https://github.com/gnss-sdr/gnss-sdr"
 title: GNSS-SDR
 type: software
 url: "https://gnss-sdr.org"
-version: "0.0.20"
+version: "0.0.21"

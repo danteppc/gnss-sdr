@@ -15,7 +15,7 @@ jobs:
   build-ubuntu:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: install dependencies
         run: |
           sudo apt update
@@ -41,10 +41,10 @@ jobs:
   build-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
-          python-version: '3.12'      
+          python-version: '3.13'      
       - name: install dependencies
         run: |
           brew update
@@ -58,7 +58,7 @@ jobs:
           rm /usr/local/bin/pydoc3.1* || true
           rm /usr/local/bin/python3.1* || true
           export HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
-          brew link --overwrite python@3.12
+          brew link --overwrite python@3.13
           brew install ninja hdf5 automake armadillo lapack libmatio gnuradio openssl pugixml protobuf boost
           pip3 install mako
       - name: configure
@@ -75,10 +75,10 @@ jobs:
   build-macos-xcode:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          python-version: '3.13'
       - name: install dependencies
         run: |
           brew update
@@ -92,7 +92,7 @@ jobs:
           rm /usr/local/bin/pydoc3.1* || true
           rm /usr/local/bin/python3.1* || true
           export HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
-          brew link --overwrite python@3.12
+          brew link --overwrite python@3.13
           brew install ninja pkg-config hdf5 automake armadillo lapack libmatio gnuradio openssl pugixml protobuf boost
           pip3 install mako          
       - name: configure
@@ -119,45 +119,45 @@ jobs:
           - 'src'
           - 'tests'
           - 'utils'
+          - 'docs'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: run clang-format
-        uses: jidicula/clang-format-action@v4.14.0
+        uses: jidicula/clang-format-action@v4.18.0
         with:
           clang-format-version: "19"
           check-path: ${{ matrix.path }}
-          exclude-regex: '(libs\/gsl\/)|(tmpl)|(cpu_features)|^.*\.(cu|proto)$'
+          exclude-regex: '(libs\/gsl\/)|(tmpl)|(cpu_features)|^.*\.(cu)$'
 
   clang-tidy:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
+    env:
+      CLANG_VERSION: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: install dependencies
+      - uses: actions/checkout@v6
+      - name: Install dependencies
         run: |
-          brew update
-          rm /usr/local/bin/2to3 || true
-          rm /usr/local/bin/idle3 || true
-          rm /usr/local/bin/pydoc3 || true
-          rm /usr/local/bin/python3 || true
-          rm /usr/local/bin/python3-config || true
-          rm /usr/local/bin/2to3-3.1* || true
-          rm /usr/local/bin/idle3.1* || true
-          rm /usr/local/bin/pydoc3.1* || true
-          rm /usr/local/bin/python3.1* || true
-          export HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK=1
-          brew link --overwrite python@3.12
-          brew install ninja pkg-config hdf5 automake armadillo lapack libmatio gnuradio openssl pugixml protobuf llvm boost
-          pip3 install mako
-          ln -s $(brew --prefix llvm)/bin/clang-tidy /usr/local/bin
-          ln -s $(brew --prefix llvm)/bin/clang-apply-replacements /usr/local/bin
-          ln -s $(brew --prefix llvm)/bin/run-clang-tidy.py /usr/local/bin
+          sudo apt update
+          sudo apt install -y --no-install-recommends cmake \
+          clang-${CLANG_VERSION} clang-tidy-${CLANG_VERSION} clang-format-${CLANG_VERSION} \
+          libboost-dev libboost-date-time-dev libboost-system-dev libboost-filesystem-dev \
+          libboost-thread-dev libboost-chrono-dev libboost-serialization-dev \
+          liblog4cpp5-dev gnuradio-dev gr-osmosdr libpugixml-dev libpcap-dev libblas-dev \
+          liblapack-dev libarmadillo-dev libgflags-dev libgoogle-glog-dev libunwind-dev \
+          libgnutls-openssl-dev libmatio-dev googletest protobuf-compiler libprotobuf-dev \
+          python3-mako liborc-0.4-dev
+          sudo ln -sf /usr/lib/llvm-${CLANG_VERSION}/bin/clang /usr/bin/clang
+          sudo ln -sf /usr/lib/llvm-${CLANG_VERSION}/bin/clang /usr/bin/clang++
+          sudo ln -sf /usr/lib/llvm-${CLANG_VERSION}/bin/clang-format /usr/bin/clang-format
+          sudo ln -sf /usr/lib/llvm-${CLANG_VERSION}/bin/clang-tidy /usr/bin/clang-tidy
+          sudo ln -sf /usr/lib/llvm-${CLANG_VERSION}/bin/run-clang-tidy /usr/bin/run-clang-tidy
       - name: Prepare run
-        run: cmake -S . -B build && cmake --build build --target volk_gnsssdr_module gtest-1.16.0 core_monitor core_libs pvt_libs
-      - name: run clang-tidy
-        run: cd build && /opt/homebrew/opt/llvm/bin/run-clang-tidy -fix
+        run: |
+          cmake -S . -B build-tidy -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -DCMAKE_C_COMPILER=/usr/bin/clang
+          cmake --build build-tidy --target volk_gnsssdr_module gtest-1.17.0 core_monitor core_libs pvt_libs
+      - name: Run clang-tidy
+        run: |
+          cd build-tidy && run-clang-tidy -fix -format
       - name: check
         run: |
           git diff > clang_tidy.patch
@@ -168,7 +168,7 @@ jobs:
   cpplint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: install dependencies
         run: sudo apt install python3-pip && sudo pip3 install cpplint
       - name: run checks
@@ -189,16 +189,22 @@ jobs:
   prettier-markdown:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: install dependencies
-        run: sudo npm install --global prettier
-      - name: check markdown
-        run: find . -iname "*.md" | xargs prettier --parser markdown --print-width 80 --prose-wrap always --list-different
+      - uses: actions/checkout@v6
+      - name: Set up latest Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: latest
+      - name: Install prettier
+        run: npm install --global prettier
+      - name: Process markdown files
+        run: prettier --parser markdown --print-width 80 --prose-wrap always --write "**/*.md"
+      - name: Show required fixes
+        run: git diff --exit-code
 
   cmakelint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: install dependencies
         run: |
           sudo pip install cmakelint
@@ -208,8 +214,8 @@ jobs:
   volk-gnsssdr-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
       - name: Install dependencies
@@ -232,7 +238,7 @@ jobs:
   volk-gnsssdr-ubuntu:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: install dependencies
         run: sudo apt install python3-mako liborc-dev
       - name: configure
@@ -247,8 +253,8 @@ jobs:
   volk-gnsssdr-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
       - name: Install dependencies
@@ -265,8 +271,8 @@ jobs:
   volk-gnsssdr-macos-xcode:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.13'
       - name: Install dependencies
@@ -280,12 +286,12 @@ jobs:
       - name: install
         run: sudo cmake --install build
       - name: test
-        run: ctest -C Release --test-dir build --exclude-regex --exclude-regex volk_gnsssdr_32fc_32f_rotator_dotprodxnpuppet_32fc
+        run: ctest -C Release --test-dir build --exclude-regex volk_gnsssdr_32fc_32f_rotator_dotprodxnpuppet_32fc
 
   shellcheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: install dependencies
         run: sudo apt install shellcheck
       - name: check scripts
@@ -294,8 +300,38 @@ jobs:
   REUSE-compliance:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check REUSE compliance
         uses: docker://fsfe/reuse
         with:
           args: lint
+
+  long-line-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Find lines longer than 512 characters
+        run: |
+          set -uo pipefail
+          echo "🔍 Checking for lines with >512 characters ..."
+          FLAG_FILE=$(mktemp) > "$FLAG_FILE"
+          find . \( -name "*.c" -o -name "*.cpp" -o -name "*.cc" -o -name "*.h" -o -name "*.hpp" -o -name "*.py" -o -name "*.txt" -o -name "*.sh" -o -name "*.proto" -o -name "*.yml" \) -print0 \
+            | while IFS= read -r -d '' file; do
+              awk -v fname="$file" 'length($0) > 512 {
+                gsub(/^\.\/?/, "", fname)
+                printf "::error file=%s,line=%d::Line exceeds 512 characters\n", fname, NR
+                print fname ":" NR ": " $0
+              }' "$file" || true
+              if awk 'length($0) > 512 { exit 1 }' "$file"; then
+                :
+              else
+                echo 1 > "$FLAG_FILE"
+              fi
+            done
+          if grep -q 1 "$FLAG_FILE"; then
+            echo "❌ One or more lines exceed 512 characters"
+            exit 1
+          else
+            echo "✅ No long lines found."
+          fi
+          rm -f "$FLAG_FILE"

@@ -1,14 +1,14 @@
 # GNSS-SDR is a Global Navigation Satellite System software-defined receiver.
 # This file is part of GNSS-SDR.
 #
-# SPDX-FileCopyrightText: 2010-2021 C. Fernandez-Prades cfernandez(at)cttc.es
+# SPDX-FileCopyrightText: 2010-2026 C. Fernandez-Prades cfernandez(at)cttc.es
 # SPDX-License-Identifier: BSD-3-Clause
 
 
 ########################################################################
 # Project setup
 ########################################################################
-cmake_minimum_required(VERSION 2.8.12...4.0)
+cmake_minimum_required(VERSION 2.8.12...4.3)
 set(CMAKE_BUILD_TYPE ${CMAKE_BUILD_TYPE} CACHE STRING "Choose build type: None Debug Release RelWithDebInfo MinSizeRel")
 project(volk_gnsssdr)
 enable_language(CXX)
@@ -206,7 +206,7 @@ message(STATUS "Build type set to ${CMAKE_BUILD_TYPE}.")
 
 set(VERSION_INFO_MAJOR_VERSION 0)
 set(VERSION_INFO_MINOR_VERSION 0)
-set(VERSION_INFO_MAINT_VERSION 20)
+set(VERSION_INFO_MAINT_VERSION 21)
 include(VolkGnsssdrVersion) # setup version info
 include(VolkGnsssdrFindPaths) # set VOLK_GNSSSDR_LIB_PATHS and VOLK_GNSSSDR_INCLUDE_PATHS
 
@@ -300,7 +300,11 @@ if(CMAKE_VERSION VERSION_GREATER 3.0 AND VOLK_CPU_FEATURES)
                 set(ENABLE_INSTALL_AUX ${ENABLE_INSTALL})
             endif()
             set(ENABLE_INSTALL ON)
+            set(AUX_CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
             add_subdirectory(cpu_features)
+            unset(CMAKE_INSTALL_PREFIX CACHE)
+            set(CMAKE_INSTALL_PREFIX ${AUX_CMAKE_INSTALL_PREFIX})
+            unset(AUX_CMAKE_INSTALL_PREFIX CACHE)
             unset(ENABLE_INSTALL)
             if(ENABLE_INSTALL_AUX)
                 set(ENABLE_INSTALL ${ENABLE_INSTALL_AUX})

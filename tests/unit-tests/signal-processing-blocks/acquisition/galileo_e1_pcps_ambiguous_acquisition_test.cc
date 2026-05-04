@@ -104,7 +104,7 @@ GalileoE1PcpsAmbiguousAcquisitionTest_msg_rx::GalileoE1PcpsAmbiguousAcquisitionT
     this->message_port_register_in(pmt::mp("events"));
     this->set_msg_handler(pmt::mp("events"),
 #if HAS_GENERIC_LAMBDA
-        [this](auto&& PH1) { msg_handler_channel_events(PH1); });
+        [this](auto&& PH1) { msg_handler_channel_events(std::forward<decltype(PH1)>(PH1)); });
 #else
 #if USE_BOOST_BIND_PLACEHOLDERS
         boost::bind(&GalileoE1PcpsAmbiguousAcquisitionTest_msg_rx::msg_handler_channel_events, this, boost::placeholders::_1));
@@ -174,7 +174,7 @@ void GalileoE1PcpsAmbiguousAcquisitionTest::init()
             config->set_property("Acquisition_1B.dump", "false");
         }
     config->set_property("Acquisition_1B.dump_filename", "./tmp-acq-gal1/acquisition");
-    // config->set_property("Acquisition_1B.threshold", "2.5");
+    config->set_property("Acquisition_1B.threshold", std::to_string(1e-9));
     config->set_property("Acquisition_1B.pfa", "0.001");
     config->set_property("Acquisition_1B.doppler_max", std::to_string(doppler_max));
     config->set_property("Acquisition_1B.doppler_step", std::to_string(doppler_step));
@@ -333,18 +333,6 @@ TEST_F(GalileoE1PcpsAmbiguousAcquisitionTest, ValidationOfResults)
     }) << "Failure setting gnss_synchro.";
 
     ASSERT_NO_THROW({
-        acquisition->set_threshold(config->property("Acquisition_1B.threshold", 1e-9));
-    }) << "Failure setting threshold.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_doppler_max(config->property("Acquisition_1B.doppler_max", doppler_max));
-    }) << "Failure setting doppler_max.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_doppler_step(config->property("Acquisition_1B.doppler_step", doppler_step));
-    }) << "Failure setting doppler_step.";
-
-    ASSERT_NO_THROW({
         acquisition->connect(top_block);
     }) << "Failure connecting acquisition to the top_block.";
 
@@ -358,9 +346,7 @@ TEST_F(GalileoE1PcpsAmbiguousAcquisitionTest, ValidationOfResults)
     }) << "Failure connecting the blocks of acquisition test.";
 
     acquisition->set_local_code();
-    acquisition->init();
     acquisition->reset();
-    acquisition->set_state(1);
 
     EXPECT_NO_THROW({
         start = std::chrono::system_clock::now();

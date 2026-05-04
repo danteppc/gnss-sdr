@@ -18,19 +18,12 @@
 #define GNSS_SDR_BEIDOU_B3I_TELEMETRY_DECODER_GS_H
 
 #include "beidou_dnav_navigation_message.h"
-#include "gnss_block_interface.h"
-#include "gnss_satellite.h"
 #include "nav_message_packet.h"
+#include "telemetry_impl_interface.h"
 #include "tlm_conf.h"
-#include "tlm_crc_stats.h"
 #include <boost/circular_buffer.hpp>
-#include <gnuradio/block.h>  // for block
 #include <gnuradio/types.h>  // for gr_vector_const_void_star
 #include <array>
-#include <cstdint>
-#include <fstream>
-#include <memory>  // for std::unique_ptr
-#include <string>
 
 
 /** \addtogroup Telemetry_Decoder
@@ -51,13 +44,13 @@ beidou_b3i_telemetry_decoder_gs_sptr beidou_b3i_make_telemetry_decoder_gs(
 /*!
  * \brief This class implements a block that decodes the BeiDou DNAV data.
  */
-class beidou_b3i_telemetry_decoder_gs : public gr::block
+class beidou_b3i_telemetry_decoder_gs : public telemetry_impl_interface
 {
 public:
-    ~beidou_b3i_telemetry_decoder_gs() override;          //!< Class destructor
-    void set_satellite(const Gnss_Satellite &satellite);  //!< Set satellite PRN
-    void set_channel(int channel);                        //!< Set receiver's channel
-    void reset();
+    ~beidou_b3i_telemetry_decoder_gs() override;                   //!< Class destructor
+    void set_satellite(const Gnss_Satellite &satellite) override;  //!< Set satellite PRN
+    void set_channel(int channel) override;                        //!< Set receiver's channel
+    void reset() override;
 
     /*!
      * \brief This is where all signal processing takes place
@@ -122,6 +115,7 @@ private:
     bool d_remove_dat;
     bool d_enable_navdata_monitor;
     bool d_dump_crc_stats;
+    bool d_tow_to_trk;
 };
 
 

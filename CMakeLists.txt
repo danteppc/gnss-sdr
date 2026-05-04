@@ -1,7 +1,7 @@
 # GNSS-SDR is a Global Navigation Satellite System software-defined receiver.
 # This file is part of GNSS-SDR.
 #
-# SPDX-FileCopyrightText: 2010-2025 C. Fernandez-Prades cfernandez(at)cttc.es
+# SPDX-FileCopyrightText: 2010-2026 C. Fernandez-Prades cfernandez(at)cttc.es
 # SPDX-License-Identifier: BSD-3-Clause
 
 ################################################################################
@@ -16,7 +16,7 @@ endif()
 # Build type can still be overridden by setting -DCMAKE_BUILD_TYPE=
 set(CMAKE_BUILD_TYPE "Release" CACHE STRING "")
 
-cmake_minimum_required(VERSION 2.8.12...4.0)
+cmake_minimum_required(VERSION 2.8.12...4.3)
 project(gnss-sdr CXX C)
 
 set(GNSSSDR_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}) # Allows to be a sub-project
@@ -50,7 +50,7 @@ option(ENABLE_DMA_PROXY "Enable the use of the DMA direct to FPGA hardware, requ
 
 option(ENABLE_RAW_UDP "Enable the use of high-optimized custom UDP packet sample source, requires libpcap" OFF)
 
-option(ENABLE_FLEXIBAND "Enable the use of the signal source adater for the Teleorbit Flexiband GNU Radio driver" OFF)
+option(ENABLE_FLEXIBAND "Enable the use of the signal source adapter for the Teleorbit Flexiband GNU Radio driver" OFF)
 
 option(ENABLE_ARRAY "Enable the use of CTTC's antenna array front-end as signal source (experimental)" OFF)
 
@@ -197,9 +197,9 @@ endif()
 set(VERSION_INFO_MAJOR_VERSION 0)
 set(VERSION_INFO_API_COMPAT 0)
 if(${THIS_IS_A_RELEASE})
-    set(VERSION_INFO_MINOR_VERSION 20)
+    set(VERSION_INFO_MINOR_VERSION 21)
 else()
-    set(VERSION_INFO_MINOR_VERSION 20.git-${GIT_BRANCH}-${GIT_COMMIT_HASH})
+    set(VERSION_INFO_MINOR_VERSION 21.git-${GIT_BRANCH}-${GIT_COMMIT_HASH})
 endif()
 
 set(VERSION ${VERSION_INFO_MAJOR_VERSION}.${VERSION_INFO_API_COMPAT}.${VERSION_INFO_MINOR_VERSION})
@@ -337,7 +337,7 @@ endif()
 # Minimum required versions
 ################################################################################
 set(GNSSSDR_APPLECLANG_MIN_VERSION "500")
-set(GNSSSDR_ARMADILLO_MIN_VERSION "5.300.0")
+set(GNSSSDR_ARMADILLO_MIN_VERSION "9.900.0")
 set(GNSSSDR_BOOST_MIN_VERSION "1.53")
 set(GNSSSDR_CLANG_MIN_VERSION "3.4.0")
 set(GNSSSDR_GCC_MIN_VERSION "4.7.2")
@@ -355,21 +355,30 @@ set(GNSSSDR_ABSEIL_MIN_VERSION "20240116")
 ################################################################################
 # Versions to download and build (but not to install system-wide) if not found
 ################################################################################
-set(GNSSSDR_ARMADILLO_LOCAL_VERSION "14.4.x")
-set(GNSSSDR_GFLAGS_LOCAL_VERSION "2.2.2")
+set(GNSSSDR_ARMADILLO_LOCAL_VERSION "15.2.x")
+set(GNSSSDR_GFLAGS_LOCAL_VERSION "2.3.0")
 set(GNSSSDR_GLOG_LOCAL_VERSION "0.7.1")
-set(GNSSSDR_MATIO_LOCAL_VERSION "1.5.28")
-set(GNSSSDR_PROTOCOLBUFFERS_LOCAL_VERSION "30.2")
+set(GNSSSDR_MATIO_LOCAL_VERSION "1.5.30")
+set(GNSSSDR_PROTOCOLBUFFERS_LOCAL_VERSION "34.1")
 set(GNSSSDR_PUGIXML_LOCAL_VERSION "1.15")
-set(GNSSSDR_GTEST_LOCAL_VERSION "1.16.0")
+set(GNSSSDR_GTEST_LOCAL_VERSION "1.17.0")
 set(GNSSSDR_GNSS_SIM_LOCAL_VERSION "origin/master")
-set(GNSSSDR_GNSSTK_LOCAL_VERSION "14.3.0")
-set(GNSSSDR_BENCHMARK_LOCAL_VERSION "1.9.2")
+set(GNSSSDR_GNSSTK_LOCAL_VERSION "15.0.0")
+set(GNSSSDR_BENCHMARK_LOCAL_VERSION "1.9.5")
 set(GNSSSDR_MATHJAX_EXTERNAL_VERSION "2.7.7")
 set(GNSSSDR_ABSL_LOCAL_VERSION "origin/master") # live at head (see https://abseil.io/about/releases)
 
 # Downgrade versions if requirements are not met
+
+if(CMAKE_VERSION VERSION_LESS "3.10")
+    set(GNSSSDR_ARMADILLO_LOCAL_VERSION "14.6.x")
+endif()
 if(CMAKE_VERSION VERSION_LESS "3.5")
+    set(GNSSSDR_ARMADILLO_LOCAL_VERSION "12.8.x")
+endif()
+if(((CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 8.1)) OR
+  ((CMAKE_CXX_COMPILER_ID STREQUAL "Clang") AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 6.0)) OR
+  ((CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang") AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 8.0)))
     set(GNSSSDR_ARMADILLO_LOCAL_VERSION "12.8.x")
 endif()
 
@@ -379,11 +388,13 @@ endif()
 if(CMAKE_VERSION VERSION_LESS "3.16")
     set(GNSSSDR_GLOG_LOCAL_VERSION "0.5.0")
 endif()
-
 if(CMAKE_VERSION VERSION_LESS "3.3")
     set(GNSSSDR_GLOG_LOCAL_VERSION "0.4.0")
 endif()
 
+if(CMAKE_VERSION VERSION_LESS "3.10")
+    set(GNSSSDR_GFLAGS_LOCAL_VERSION "2.2.2")
+endif()
 if(CMAKE_VERSION VERSION_LESS "3.0.2")
     set(GNSSSDR_GFLAGS_LOCAL_VERSION "2.2.1")  # Fix for CentOS 7
     set(GNSSSDR_GLOG_LOCAL_VERSION "0.3.4")    # Fix for Ubuntu 14.04
@@ -397,7 +408,7 @@ if(CMAKE_VERSION VERSION_LESS "3.4")
 endif()
 
 if(CMAKE_VERSION VERSION_LESS "3.16")
-    set(GNSSSDR_PROTOCOLBUFFERS_LOCAL_VERSION "29.3")
+    set(GNSSSDR_PROTOCOLBUFFERS_LOCAL_VERSION "29.5")
 endif()
 if(CMAKE_CROSSCOMPILING OR CMAKE_VERSION VERSION_LESS "3.13" OR
   ((CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 8.0.0)) OR
@@ -414,7 +425,6 @@ if(CMAKE_VERSION VERSION_LESS "3.13" OR
   (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
     set(GNSSSDR_GTEST_LOCAL_VERSION "1.13.0")
 endif()
-
 if((CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 5.0) OR
   (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 5.0) OR
   CMAKE_VERSION VERSION_LESS 3.5)
@@ -423,6 +433,12 @@ endif()
 
 if(CMAKE_VERSION VERSION_LESS "3.17")
     set(GNSSSDR_GNSSTK_LOCAL_VERSION "13.7.0")
+endif()
+
+if((CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 8.0) OR
+  (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 10.0) OR
+  (CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 12.0))
+    set(GNSSSDR_BENCHMARK_LOCAL_VERSION "1.9.2")
 endif()
 
 
@@ -695,6 +711,13 @@ set_package_properties(GNURADIO PROPERTIES
     PURPOSE "Implements flowgraph scheduler, provides some processing blocks and classes to create new ones."
     TYPE REQUIRED
 )
+if(NOT GNURADIO_FOUND)
+    message(FATAL_ERROR
+        "GNU Radio is required but not found. Please install GNU Radio "
+        "v${GNSSSDR_GNURADIO_MIN_VERSION} or more recent, or set "
+        "GNURADIO_INSTALL_PREFIX to the GNU Radio installation folder."
+    )
+endif()
 
 if(NOT (GNURADIO_VERSION VERSION_LESS "3.8"))
     set(GNURADIO_IS_38_OR_GREATER ON)
@@ -791,19 +814,15 @@ set(BOOST_COMPONENTS atomic chrono date_time serialization system thread)
 if(NOT ${FILESYSTEM_FOUND})
     set(BOOST_COMPONENTS ${BOOST_COMPONENTS} filesystem)
 endif()
-if(CMAKE_VERSION VERSION_LESS 3.30)
-    find_package(Boost ${GNSSSDR_BOOST_MIN_VERSION} COMPONENTS ${BOOST_COMPONENTS} REQUIRED)
+find_package(Boost ${GNSSSDR_BOOST_MIN_VERSION} COMPONENTS ${BOOST_COMPONENTS})
+if(Boost_FOUND)
+    get_filename_component(BOOST_PREFIX ${Boost_INCLUDE_DIRS} DIRECTORY)
+    message(STATUS "Found Boost v${Boost_VERSION_STRING} at ${BOOST_PREFIX}")
 else()
-    find_package(Boost ${GNSSSDR_BOOST_MIN_VERSION} COMPONENTS ${BOOST_COMPONENTS})
-    if(Boost_FOUND)
-        get_filename_component(BOOST_PREFIX ${Boost_INCLUDE_DIRS} DIRECTORY)
-        message(STATUS "Found Boost v${Boost_VERSION_STRING} at ${BOOST_PREFIX}")
-    else()
-        message(STATUS "Trying deprecated FindBoost Module ...")
-        if(POLICY CMP0167)
-            cmake_policy(SET CMP0167 OLD)
-            find_package(Boost ${GNSSSDR_BOOST_MIN_VERSION} REQUIRED COMPONENTS ${BOOST_COMPONENTS})
-        endif()
+    message(STATUS "Trying deprecated FindBoost Module ...")
+    if(POLICY CMP0167)
+        cmake_policy(SET CMP0167 OLD)
+        find_package(Boost ${GNSSSDR_BOOST_MIN_VERSION} REQUIRED COMPONENTS ${BOOST_COMPONENTS})
     endif()
 endif()
 if(NOT Boost_FOUND)
@@ -908,51 +927,55 @@ endif()
 
 # Provide package descriptions if Boost >= 1.71.00
 if(Boost_VERSION_STRING VERSION_GREATER 1.70.99)
+    set(boost_version_string "${Boost_VERSION_STRING}")
+    string(REPLACE "." "_" boost_version_underscored "${boost_version_string}")
     set_package_properties(boost_headers PROPERTIES
-        URL "https://www.boost.org/"
+        URL "https://www.boost.org/libraries/${Boost_VERSION_STRING}/grid/"
         DESCRIPTION "Header files of Boost libraries"
         PURPOSE "Used widely across the source code."
         TYPE REQUIRED
     )
     set_package_properties(boost_atomic PROPERTIES
-        URL "https://www.boost.org/doc/libs/release/doc/html/atomic.html"
+        URL "https://www.boost.org/doc/libs/${boost_version_underscored}/doc/html/index.html"
         DESCRIPTION "Provides atomic data types and operations on those types"
         PURPOSE "Required by Boost Thread."
         TYPE REQUIRED
     )
     set_package_properties(boost_chrono PROPERTIES
-        URL "https://www.boost.org/doc/libs/release/doc/html/chrono.html"
+        URL "https://www.boost.org/doc/libs/${boost_version_underscored}/doc/html/chrono.html"
         DESCRIPTION "Useful time utilities"
         PURPOSE "Required by Boost Thread."
         TYPE REQUIRED
     )
     set_package_properties(boost_date_time PROPERTIES
-        URL "https://www.boost.org/doc/libs/release/doc/html/date_time.html"
+        URL "https://www.boost.org/doc/libs/${boost_version_underscored}/doc/html/date_time.html"
         DESCRIPTION "A set of date-time libraries"
         PURPOSE "Required by Boost Thread."
         TYPE REQUIRED
     )
     set_package_properties(boost_serialization PROPERTIES
-        URL "https://www.boost.org/doc/libs/release/libs/serialization/doc/index.html"
+        URL "https://www.boost.org/doc/libs/${boost_version_underscored}/libs/serialization/doc/index.html"
         DESCRIPTION "Reversible deconstruction of C++ data structures to sequences of bytes"
         PURPOSE "Used for serializing data."
         TYPE REQUIRED
     )
-    set_package_properties(boost_system PROPERTIES
-        URL "https://www.boost.org/doc/libs/release/libs/system/doc/html/system.html"
-        DESCRIPTION "Extensible error reporting library"
-        PURPOSE "Used for error reporting."
-        TYPE REQUIRED
-    )
     set_package_properties(boost_thread PROPERTIES
-        URL "https://www.boost.org/doc/libs/release/doc/html/thread.html"
+        URL "https://www.boost.org/doc/libs/${boost_version_underscored}/doc/html/thread.html"
         DESCRIPTION "Portable C++ multi-threading"
         PURPOSE "Used by GNU Radio multi-threading system."
         TYPE REQUIRED
     )
+    if(Boost_VERSION_STRING VERSION_LESS 1.88.99)
+        set_package_properties(boost_system PROPERTIES
+            URL "https://www.boost.org/doc/libs/${boost_version_underscored}/libs/system/doc/html/system.html"
+            DESCRIPTION "Extensible error reporting library"
+            PURPOSE "Used for error reporting."
+            TYPE REQUIRED
+        )
+    endif()
     if(NOT ${FILESYSTEM_FOUND})
         set_package_properties(boost_filesystem PROPERTIES
-            URL "https://www.boost.org/doc/libs/release/libs/filesystem/doc/index.htm"
+            URL "https://www.boost.org/doc/libs/${boost_version_underscored}/libs/filesystem/doc/index.htm"
             DESCRIPTION "Portable facilities to manipulate paths and files"
             PURPOSE "Used for output file handling."
             TYPE REQUIRED
@@ -1004,7 +1027,7 @@ if(Boost_VERSION_STRING VERSION_LESS 1.70.0)
     )
 endif()
 
-# Fox for CentOS 7 with cmake3 and gcc8
+# Fix for CentOS 7 with cmake3 and gcc8
 if(Boost_VERSION_STRING VERSION_LESS "1.60")
     set(USE_GENERIC_LAMBDAS OFF)
 endif()
@@ -1012,6 +1035,13 @@ endif()
 # Fix for Boost >= 1.73
 if(Boost_VERSION_STRING VERSION_GREATER 1.72.99)
     set(USE_BOOST_BIND_PLACEHOLDERS ON)
+endif()
+
+# Fix for Boost >= 1.89 - Boost::system becomes header-only
+if(Boost_VERSION_STRING VERSION_LESS 1.89.0)
+    set(NEED_BOOST_SYSTEM ON)
+else()
+    set(NEED_BOOST_SYSTEM OFF)
 endif()
 
 
@@ -1526,6 +1556,9 @@ if(NOT CMAKE_VERSION VERSION_LESS 3.24
                 DESCRIPTION "A collection of C++ library code designed to augment the C++ standard library (found: v${absl_VERSION}, but it is too old and it will not be used)"
             )
         endif()
+        if(absl_FOUND)
+            set_package_properties(absl PROPERTIES TYPE REQUIRED)
+        endif()
     endif()
 endif()
 
@@ -1610,7 +1643,7 @@ if(NOT absl_FOUND)
             if((CMAKE_VERSION VERSION_GREATER 3.12.0) AND NOT (CMAKE_GENERATOR STREQUAL Xcode))
                 set(PARALLEL_BUILD "--parallel 2")
             endif()
-            if(CMAKE_VERSION VERSION_LESS 4.0)
+            if(CMAKE_VERSION VERSION_LESS 3.10)
                 ExternalProject_Add(gflags-${GNSSSDR_GFLAGS_LOCAL_VERSION}
                     PREFIX ${GNSSSDR_BINARY_DIR}/gflags-${GNSSSDR_GFLAGS_LOCAL_VERSION}
                     GIT_REPOSITORY https://github.com/gflags/gflags.git
@@ -1635,7 +1668,7 @@ if(NOT absl_FOUND)
                 ExternalProject_Add(gflags-${GNSSSDR_GFLAGS_LOCAL_VERSION}
                 PREFIX ${GNSSSDR_BINARY_DIR}/gflags-${GNSSSDR_GFLAGS_LOCAL_VERSION}
                 GIT_REPOSITORY https://github.com/gflags/gflags.git
-                GIT_TAG 52e94563eba1968783864942fedf6e87e3c611f4
+                GIT_TAG v${GNSSSDR_GFLAGS_LOCAL_VERSION}
                 SOURCE_DIR ${GNSSSDR_BINARY_DIR}/thirdparty/gflags/gflags-${GNSSSDR_GFLAGS_LOCAL_VERSION}
                 BINARY_DIR ${GNSSSDR_BINARY_DIR}/gflags-${GNSSSDR_GFLAGS_LOCAL_VERSION}
                 CMAKE_ARGS -DBUILD_SHARED_LIBS=OFF
@@ -2174,7 +2207,7 @@ if(NOT ARMADILLO_FOUND OR ENABLE_OWN_ARMADILLO)
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND ${CMAKE_CXX_COMPILER_VERSION} VERSION_LESS 4.8.3)
         set(ARMADILLO_CXX_VERSION -DCMAKE_CXX_FLAGS=-std=c++11)
     endif()
-    if(CMAKE_VERSION VERSION_LESS 3.2)
+    if(${GNSSSDR_ARMADILLO_LOCAL_VERSION} MATCHES "12.8")
         ExternalProject_Add(armadillo-${armadillo_RELEASE}
             PREFIX ${GNSSSDR_BINARY_DIR}/armadillo-${armadillo_RELEASE}
             GIT_REPOSITORY https://gitlab.com/conradsnicta/armadillo-code.git
@@ -2256,26 +2289,28 @@ if(NOT ARMADILLO_FOUND OR ENABLE_OWN_ARMADILLO)
         PURPOSE "Armadillo ${GNSSSDR_ARMADILLO_LOCAL_VERSION} will be downloaded, built, and statically linked when doing '${CMAKE_MAKE_PROGRAM_PRETTY_NAME}'."
     )
     # Fix for macOS
-    find_library(ARPACK_LIBRARY
-        NAMES arpack
-        PATHS ${CMAKE_SYSTEM_LIBRARY_PATH} ${GNSSSDR_LIB_PATHS}
-    )
-    if(ARPACK_LIBRARY)
-        target_link_libraries(Armadillo::armadillo INTERFACE ${ARPACK_LIBRARY})
-    endif()
-    find_library(FLEXIBLAS_LIBRARY
-        NAMES flexiblas
-        PATHS ${CMAKE_SYSTEM_LIBRARY_PATH} ${GNSSSDR_LIB_PATHS}
-    )
-    if(FLEXIBLAS_LIBRARY)
-        target_link_libraries(Armadillo::armadillo INTERFACE ${FLEXIBLAS_LIBRARY})
-    endif()
-    find_library(SUPERLU_LIBRARY
-        NAMES superlu
-        PATHS ${CMAKE_SYSTEM_LIBRARY_PATH} ${GNSSSDR_LIB_PATHS}
-    )
-    if(SUPERLU_LIBRARY)
-        target_link_libraries(Armadillo::armadillo INTERFACE ${SUPERLU_LIBRARY})
+    if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
+        find_library(ARPACK_LIBRARY
+            NAMES arpack
+            PATHS ${CMAKE_SYSTEM_LIBRARY_PATH} ${GNSSSDR_LIB_PATHS}
+        )
+        if(ARPACK_LIBRARY)
+            target_link_libraries(Armadillo::armadillo INTERFACE ${ARPACK_LIBRARY})
+        endif()
+        find_library(FLEXIBLAS_LIBRARY
+            NAMES flexiblas
+            PATHS ${CMAKE_SYSTEM_LIBRARY_PATH} ${GNSSSDR_LIB_PATHS}
+        )
+        if(FLEXIBLAS_LIBRARY)
+            target_link_libraries(Armadillo::armadillo INTERFACE ${FLEXIBLAS_LIBRARY})
+        endif()
+        find_library(SUPERLU_LIBRARY
+            NAMES superlu
+            PATHS ${CMAKE_SYSTEM_LIBRARY_PATH} ${GNSSSDR_LIB_PATHS}
+        )
+        if(SUPERLU_LIBRARY)
+            target_link_libraries(Armadillo::armadillo INTERFACE ${SUPERLU_LIBRARY})
+        endif()
     endif()
 endif()
 
@@ -3350,12 +3385,32 @@ endif()
 if(ENABLE_ION)
     include(FetchContent)
     set(CMAKE_POLICY_DEFAULT_CMP0063 NEW)
+    # Fix for CMake 4.0
+    set(ION_METADATA_PATCH_COMMAND "")
+    if(NOT CMAKE_VERSION VERSION_LESS 4.0)
+        find_program(Patch_EXECUTABLE NAME patch PATHS ENV PATH)
+        if(NOT Patch_EXECUTABLE)
+            message(FATAL_ERROR "The patch command is not found. It is required to build the ION GNSS-SDR Metadata Standard. Please check your OS documentation and install the patch command.")
+        endif()
+        set(ION_METADATA_PATCH_COMMAND
+            ${Patch_EXECUTABLE} -p0 -i ${GNSSSDR_SOURCE_DIR}/utils/patches/ion_gnss_standard_cmake.patch
+        )
+    endif()
+    # Patch only once
+    if(EXISTS ${GNSSSDR_BINARY_DIR}/thirdparty/gnss-metadata-standard/CMakeLists.txt)
+        set(ION_METADATA_PATCH_COMMAND "")
+    endif()
+    set(NO_WARNING_FLAGS "")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32)
+        set(NO_WARNING_FLAGS "-DCMAKE_CXX_FLAGS_INIT=-w" "-DCMAKE_C_FLAGS_INIT=-w")
+    endif()
     FetchContent_Declare(
         gnss_metadata_standard
         GIT_REPOSITORY https://github.com/IonMetadataWorkingGroup/GNSS-Metadata-Standard
         GIT_TAG 220d116e10db5e403e21b77a1fa25aa35feda198
         SOURCE_DIR ${GNSSSDR_BINARY_DIR}/thirdparty/gnss-metadata-standard
-        CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${GNSSSDR_BINARY_DIR}/gnss-metadata-standard
+        PATCH_COMMAND ${ION_METADATA_PATCH_COMMAND}
+        CMAKE_ARGS ${NO_WARNING_FLAGS} -DCMAKE_INSTALL_PREFIX=${GNSSSDR_BINARY_DIR}/gnss-metadata-standard
         BINARY_DIR ${GNSSSDR_BINARY_DIR}/gnss-metadata-standard
     )
     FetchContent_MakeAvailable(gnss_metadata_standard)
@@ -3467,7 +3522,8 @@ if(ENABLE_DMA_PROXY)
             set(TARGET_ROOTFS_PATH "")
         endif()
     endif()
-    file(GLOB_RECURSE DMA_PROXY_FILE "${TARGET_ROOTFS_PATH}/*/dma-proxy.ko")
+    file(GLOB_RECURSE DMA_PROXY_FILES "${TARGET_ROOTFS_PATH}/*/dma-proxy.ko")
+    list(GET DMA_PROXY_FILES 0 DMA_PROXY_FILE)
     if(EXISTS "${DMA_PROXY_FILE}")
         message(STATUS "Found dma-proxy.ko file: ${DMA_PROXY_FILE}")
         set(ENABLE_FPGA ON)

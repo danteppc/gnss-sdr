@@ -1,16 +1,17 @@
 /*!
  * \file labsat23_source.cc
  *
- * \brief Unpacks capture files in the LabSat 2 (ls2), LabSat 3 (ls3), or LabSat
- * 3 Wideband (LS3W) formats.
+ * \brief Unpacks capture files in the LabSat 2 (ls2), LabSat 3 (ls3), LabSat 3
+ * Wideband (LS3W), and Labsat 4 (ls4) formats.
  * \author Javier Arribas jarribas (at) cttc.es
+ *         Mathieu Favreau favreau.mathieu (at) hotmail.com
  *
  * -----------------------------------------------------------------------------
  *
  * GNSS-SDR is a Global Navigation Satellite System software-defined receiver.
  * This file is part of GNSS-SDR.
  *
- * Copyright (C) 2010-2021  (see AUTHORS file for a list of contributors)
+ * Copyright (C) 2010-2025  (see AUTHORS file for a list of contributors)
  * SPDX-License-Identifier: GPL-3.0-or-later
  *
  * -----------------------------------------------------------------------------
@@ -20,57 +21,208 @@
 #include "labsat23_source.h"
 #include "INIReader.h"
 #include "command_event.h"
-#include "gnss_sdr_make_unique.h"
-#include <gnuradio/io_signature.h>
-#include <algorithm>
-#include <array>
+#include "gnss_sdr_filesystem.h"
+#include "gnss_sdr_make_unique.h"  // for std::make_unique in C++11
 #include <bitset>
-#include <exception>
-#include <iomanip>
-#include <iostream>
-#include <memory>
-#include <sstream>
-#include <utility>
+#include <set>
+#include <unordered_set>
 
 #if HAS_BOOST_ENDIAN
 #include <boost/endian/conversion.hpp>
 #endif
 
+#if USE_GLOG_AND_GFLAGS
+#include <glog/logging.h>
+#else
+#include <absl/log/log.h>
+#endif
 
-labsat23_source_sptr labsat23_make_source_sptr(const char *signal_file_basename, const std::vector<int> &channel_selector, Concurrent_Queue<pmt::pmt_t> *queue, bool digital_io_enabled)
+namespace
 {
-    return labsat23_source_sptr(new labsat23_source(signal_file_basename, channel_selector, queue, digital_io_enabled));
+
+std::vector<double> generate_mapping(int qua)
+{
+    const int levels = 1 << qua;
+    const int half = levels / 2;
+    std::vector<double> mapping(levels);
+
+    // Positive half
+    for (int i = 0; i < half; i++)
+        {
+            mapping[i] = static_cast<double>(i + 1) / static_cast<double>(half);
+        }
+
+    // Negative half (mirror reversed)
+    for (int i = 0; i < half; i++)
+        {
+            mapping[half + i] = -mapping[half - 1 - i];
+        }
+
+    return mapping;
 }
 
 
-labsat23_source::labsat23_source(const char *signal_file_basename,
+void write_samples_from_bitset(const std::bitset<64> &bs, int bit_offset, int qua, gr_complex &out)
+{
+    const auto extract_bits = [&](int start, int count) {
+        unsigned val = 0;
+        for (int i = 0; i < count; ++i)
+            {
+                val = (val << 1) | bs[64 - start - i + 1];
+            }
+        return val;
+    };
+
+    const auto i_bits = extract_bits(bit_offset, qua);
+    const auto q_bits = extract_bits(bit_offset + qua, qua);
+
+    // Cache mapping per qua (so we only build it once), possible qua are 1,2,3,4,8,12
+    static std::vector<std::vector<double>> cache(12);
+    auto &mapping = cache[qua - 1];
+
+    if (mapping.empty())
+        {
+            mapping = generate_mapping(qua);
+        }
+
+    out = gr_complex(mapping[i_bits], mapping[q_bits]);
+}
+
+
+void write_samples_ls4(uint64_t data_index, int out_index, int sample_count, int32_t qua, std::vector<uint64_t> &data, gr_complex *out_samples)
+{
+    const auto buffer_index = data_index % data.size();
+
+    if (qua == 12)
+        {
+            // For 12 bit QUA, write 48 (MSBs) bits (2x IQ samples) and then shift left and add new data for next write (read 3 registers of 64 bits)
+
+            const auto write_value = [qua, out_samples](uint64_t value, uint64_t index) {
+                std::bitset<64> bs(value);
+                write_samples_from_bitset(bs, 0, qua, out_samples[index]);
+                write_samples_from_bitset(bs, 24, qua, out_samples[index + 1]);
+            };
+
+            uint64_t value = data[buffer_index];
+            write_value(value, out_index);
+
+            value = value << 48;
+            value = value | (data[buffer_index + 1] >> 16);
+            write_value(value, out_index + 2);
+
+            value = value << 48;
+            value = value | ((data[buffer_index + 1] & 0xFFFF) << 32);
+            value = value | (data[buffer_index + 2] >> 32);
+            write_value(value, out_index + 4);
+
+            value = value << 48;
+            value = value | ((data[buffer_index + 2] & 0xFFFFFFFF) << 16);
+            write_value(value, out_index + 6);
+        }
+    else
+        {
+            const auto buffer_index = data_index % data.size();
+            const std::bitset<64> bs(data[buffer_index]);
+
+            for (int32_t i = 0; i < sample_count; ++i)
+                {
+                    write_samples_from_bitset(bs, i * qua * 2, qua, out_samples[out_index + i]);
+                }
+        }
+}
+
+
+void read_file_register_to_local_endian(std::ifstream &binary_input_file, uint64_t &read_register)
+{
+#if HAS_BOOST_ENDIAN
+    binary_input_file.read(reinterpret_cast<char *>(&read_register), sizeof(read_register));
+    boost::endian::little_to_native_inplace(read_register);
+#else
+    std::array<char, 8> memory_block{};
+    binary_input_file.read(memory_block.data(), 8);
+    for (int k = 7; k >= 0; --k)
+        {
+            read_register <<= 8;
+            read_register |= uint64_t(memory_block[k]);  // This is buggy if the MSB of the char is set.
+        }
+#endif
+}
+
+bool are_equal_ignore_nonpositive(const std::vector<int32_t> &values)
+{
+    std::vector<int32_t> positives;
+    for (const auto &v : values)
+        {
+            if (v > 0)
+                {
+                    positives.push_back(v);
+                }
+        }
+
+    if (positives.size() <= 1)
+        {
+            return true;
+        }
+
+    return std::all_of(positives.begin(), positives.end(),
+        [&](int32_t v) { return v == positives[0]; });
+}
+
+}  // namespace
+
+
+labsat23_source_sptr labsat23_make_source_sptr(
+    const char *signal_file_basename,
     const std::vector<int> &channel_selector,
     Concurrent_Queue<pmt::pmt_t> *queue,
-    bool digital_io_enabled) : gr::block("labsat23_source",
-                                   gr::io_signature::make(0, 0, 0),
-                                   gr::io_signature::make(1, 3, sizeof(gr_complex))),
-                               d_queue(queue),
-                               d_channel_selector_config(channel_selector),
-                               d_current_file_number(0),
-                               d_labsat_version(0),
-                               d_channel_selector(0),
-                               d_ref_clock(0),
-                               d_bits_per_sample(0),
-                               d_header_parsed(false),
-                               d_ls3w_digital_io_enabled(digital_io_enabled)
+    bool digital_io_enabled,
+    double seconds_to_skip)
+{
+    return labsat23_source_sptr(new labsat23_source(signal_file_basename, channel_selector, queue, digital_io_enabled, seconds_to_skip));
+}
+
+
+labsat23_source::labsat23_source(
+    const char *signal_file_basename,
+    const std::vector<int> &channel_selector,
+    Concurrent_Queue<pmt::pmt_t> *queue,
+    bool digital_io_enabled,
+    double seconds_to_skip) : gr::block("labsat23_source",
+                                  gr::io_signature::make(0, 0, 0),
+                                  gr::io_signature::make(1, 3, sizeof(gr_complex))),
+                              d_queue(queue),
+                              d_channel_selector_config(channel_selector),
+                              d_current_file_number(0),
+                              d_labsat_version(0),
+                              d_channel_selector(0),
+                              d_ref_clock(0),
+                              d_bits_per_sample(0),
+                              d_header_parsed(false),
+                              d_ls3w_digital_io_enabled(digital_io_enabled)
 {
     d_signal_file_basename = std::string(signal_file_basename);
     std::string signal_file;
     this->set_output_multiple(8);
     signal_file = generate_filename();
 
-    if (d_is_ls3w)
+    if (d_is_ls3w || d_is_ls4)
         {
-            d_labsat_version = 3;
-            std::cout << "LabSat file version 3 Wideband detected.\n";
+            if (d_is_ls3w)
+                {
+                    d_labsat_version = 3;
+                    std::cout << "LabSat file version 3 Wideband detected.\n";
+                }
+            else if (d_is_ls4)
+                {
+                    d_labsat_version = 4;
+                    std::cout << "LabSat file version 4 detected.\n";
+                }
+
+            fs::path file_path(signal_file);
+            file_path.replace_extension(".ini");
+
             // Read ini file
-            std::string ini_file = signal_file.substr(0, signal_file.length() - 4) + std::string("ini");
-            if (read_ls3w_ini(ini_file) != 0)
+            if (read_ls3w_ini(file_path.string()) != 0)
                 {
                     exit(1);
                 }
@@ -80,7 +232,75 @@ labsat23_source::labsat23_source(const char *signal_file_basename,
 
     if (binary_input_file.is_open())
         {
-            std::cout << "LabSat file source is reading samples from " << signal_file << '\n';
+            std::cout << "LabSat file source is reading samples from " << signal_file;
+
+            if (d_is_ls4)
+                {
+                    d_number_register_per_output = d_ls3w_QUA == 12 ? 3 : 1;
+                    d_number_sample_per_output = (d_number_register_per_output * 64) / (d_ls3w_QUA * 2);
+                    this->set_output_multiple(d_number_sample_per_output);
+
+                    const auto size = fs::file_size(d_signal_file_basename);
+                    const auto bits = size * CHAR_BIT;
+
+                    double bw_factor = 0;
+
+                    for (const auto &channel_map_it : d_channel_map)
+                        {
+                            const auto &channel = channel_map_it.second;
+
+                            if (channel.buff_size > 0)
+                                {
+                                    bw_factor += 1.0 / channel.bw_div;
+                                }
+                        }
+
+                    const auto bits_per_sample = d_ls3w_QUA * 2;  // I and Q
+                    const auto samples = bits / bits_per_sample;
+                    const auto signal_duration_s = bits / (bits_per_sample * bw_factor * d_ls3w_SMP);
+                    std::cout << ", which contains " << samples << " samples (" << size << " bytes)\n";
+                    std::cout << "GNSS signal recorded time to be processed: " << (signal_duration_s - seconds_to_skip) << " [s]\n";
+
+                    if (seconds_to_skip > 0)
+                        {
+                            if (signal_duration_s < seconds_to_skip)
+                                {
+                                    std::cout << "File duration is smaller then the seconds to skip!\n";
+                                    exit(1);
+                                }
+
+                            LOG(INFO) << "Skipping " << seconds_to_skip << " seconds of the input file";
+
+                            int64_t total_bytes_to_seek = 0;
+
+                            for (auto &channel_map_it : d_channel_map)
+                                {
+                                    auto &channel = channel_map_it.second;
+
+                                    if (channel.buff_size > 0)
+                                        {
+                                            const auto samples_to_skip = static_cast<int64_t>(seconds_to_skip * (static_cast<double>(d_ls3w_SMP) / channel.bw_div));
+                                            const auto bytes_to_skip = (samples_to_skip * bits_per_sample) / CHAR_BIT;
+                                            const auto buffers_to_skip = bytes_to_skip / channel.buff_size;
+                                            const auto bytes_to_seek = buffers_to_skip * channel.buff_size;
+                                            const auto bytes_to_read = bytes_to_skip - bytes_to_seek;
+                                            total_bytes_to_seek += bytes_to_seek;
+                                            channel.data_index = (bytes_to_read / sizeof(uint64_t));  // Can be set before read is called
+                                        }
+                                }
+
+                            // Advance in the file by a multiple of buffers, then read one buffer of each channel
+                            if (!binary_input_file.seekg(total_bytes_to_seek, std::ios::beg) || !read_ls4_data())
+                                {
+                                    LOG(ERROR) << "Error skipping bytes!";
+                                    exit(1);
+                                }
+                        }
+                }
+            else
+                {
+                    std::cout << '\n';
+                }
         }
     else
         {
@@ -112,7 +332,10 @@ labsat23_source::~labsat23_source()
 
 std::string labsat23_source::generate_filename()
 {
-    if (d_signal_file_basename.substr(d_signal_file_basename.length() - 4, 4) == ".ls2" or d_signal_file_basename.substr(d_signal_file_basename.length() - 4, 4) == ".LS2")
+    fs::path file_path(d_signal_file_basename);
+    const auto extension = file_path.extension();
+
+    if (extension == ".ls2" or extension == ".LS2")
         {
             if (d_current_file_number == 0)
                 {
@@ -120,21 +343,20 @@ std::string labsat23_source::generate_filename()
                 }
             return {"donotexist"};  // just to stop processing
         }
-    if (d_signal_file_basename.substr(d_signal_file_basename.length() - 5, 5) == ".ls3w" or d_signal_file_basename.substr(d_signal_file_basename.length() - 5, 5) == ".LS3W")
+    if (extension == ".ls3w" or extension == ".LS3W")
         {
             d_is_ls3w = true;
+            return d_signal_file_basename;
+        }
+    if (extension == ".ls4" or extension == ".LS4")
+        {
+            d_is_ls4 = true;
             return d_signal_file_basename;
         }
 
     std::ostringstream ss;
     ss << std::setw(4) << std::setfill('0') << d_current_file_number;
     return d_signal_file_basename + "_" + ss.str() + ".LS3";
-}
-
-
-int labsat23_source::getBit(uint8_t byte, int position)
-{
-    return (byte >> position) & 0x01;
 }
 
 
@@ -491,14 +713,40 @@ int labsat23_source::read_ls3w_ini(const std::string &filename)
                     qua_ss >> d_ls3w_QUA;
 
                     // Sanity check
-                    if (d_ls3w_QUA > 3)
+                    if ((d_is_ls3w && d_ls3w_QUA > 3) || (d_is_ls4 && std::unordered_set<int>{1, 2, 4, 8, 12}.count(d_ls3w_QUA) == 0))
                         {
                             std::cerr << "LabSat sample quantization of " << d_ls3w_QUA << " bits is not supported.\n";
-                            d_ls3w_QUA = 0;
+                            return -1;
                         }
                     else
                         {
                             std::cout << "LabSat sample quantization: " << d_ls3w_QUA << " bits for I + " << d_ls3w_QUA << " bits for Q.\n";
+                        }
+                }
+            else
+                {
+                    // Look for LS4 new QUAN_A _B _C fields
+                    std::string ls3w_QUA_aux = ini_reader->Get("config", "QUAN_A", empty_string);
+                    if (!ls3w_QUA_aux.empty())
+                        {
+                            std::stringstream qua_ss(ls3w_QUA_aux);
+                            qua_ss >> d_ls3w_QUA;
+
+                            // Sanity check
+                            if ((d_is_ls3w && d_ls3w_QUA > 3) || (d_is_ls4 && std::unordered_set<int>{1, 2, 4, 8, 12}.count(d_ls3w_QUA) == 0))
+                                {
+                                    std::cerr << "LabSat sample quantization of " << d_ls3w_QUA << " bits is not supported.\n";
+                                    return -1;
+                                }
+                            else
+                                {
+                                    std::cout << "LabSat sample quantization: " << d_ls3w_QUA << " bits for I + " << d_ls3w_QUA << " bits for Q.\n";
+                                }
+                        }
+                    else
+                        {
+                            std::cerr << "LabSat sample quantization QUAN_A field not found.\n";
+                            return -1;
                         }
                 }
 
@@ -513,7 +761,7 @@ int labsat23_source::read_ls3w_ini(const std::string &filename)
                     if (d_ls3w_CHN > 3)
                         {
                             std::cerr << "LabSat files with " << d_ls3w_CHN << " RF channels are not supported.\n";
-                            d_ls3w_CHN = 0;
+                            return -1;
                         }
                     else
                         {
@@ -535,117 +783,166 @@ int labsat23_source::read_ls3w_ini(const std::string &filename)
                             d_ls3w_SFT = d_ls3w_CHN * d_ls3w_QUA * 2;
                         }
                 }
-        }
 
-    // Channel A
-    if (ini_reader->HasSection("channel A"))
-        {
-            std::string ls3w_CFA_aux = ini_reader->Get("channel A", "CFA", empty_string);
-            if (!ls3w_CFA_aux.empty())
+            if (d_is_ls4)
                 {
-                    std::stringstream cfa_ss(ls3w_CFA_aux);
-                    cfa_ss >> d_ls3w_CFA;
-                    std::cout << "LabSat center frequency for RF channel A: " << d_ls3w_CFA << " Hz\n";
-                }
-
-            std::string ls3w_BWA_aux = ini_reader->Get("channel A", "BWA", empty_string);
-            if (!ls3w_BWA_aux.empty())
-                {
-                    std::stringstream bwa_ss(ls3w_BWA_aux);
-                    bwa_ss >> d_ls3w_BWA;
-                    std::cout << "LabSat RF filter bandwidth for RF channel A: " << d_ls3w_BWA << " Hz\n";
-                }
-        }
-
-    // Channel B
-    if (ini_reader->HasSection("channel B"))
-        {
-            std::string ls3w_CFB_aux = ini_reader->Get("channel B", "CFB", empty_string);
-            if (!ls3w_CFB_aux.empty())
-                {
-                    std::stringstream cfb_ss(ls3w_CFB_aux);
-                    cfb_ss >> d_ls3w_CFB;
-                    std::cout << "LabSat center frequency for RF channel B: " << d_ls3w_CFB << " Hz\n";
-                }
-
-            std::string ls3w_BWB_aux = ini_reader->Get("channel B", "BWB", empty_string);
-            if (!ls3w_BWB_aux.empty())
-                {
-                    std::stringstream bwb_ss(ls3w_BWB_aux);
-                    bwb_ss >> d_ls3w_BWB;
-                    std::cout << "LabSat RF filter bandwidth for RF channel B: " << d_ls3w_BWB << " Hz\n";
-                }
-        }
-
-    // Channel C
-    if (ini_reader->HasSection("channel C"))
-        {
-            std::string ls3w_CFC_aux = ini_reader->Get("channel C", "CFC", empty_string);
-            if (!ls3w_CFC_aux.empty())
-                {
-                    std::stringstream cfc_ss(ls3w_CFC_aux);
-                    cfc_ss >> d_ls3w_CFC;
-                    std::cout << "LabSat center frequency for RF channel C: " << d_ls3w_CFC << " Hz\n";
-                }
-
-            std::string ls3w_BWC_aux = ini_reader->Get("channel C", "BWC", empty_string);
-            if (!ls3w_BWC_aux.empty())
-                {
-                    std::stringstream bwc_ss(ls3w_BWC_aux);
-                    bwc_ss >> d_ls3w_BWC;
-                    std::cout << "LabSat RF filter bandwidth for RF channel C: " << d_ls3w_BWC << " Hz\n";
-                }
-        }
-
-    std::cout << "LabSat selected channel" << ((d_channel_selector_config.size() > 1) ? "s" : "") << ": ";
-    if (std::find(d_channel_selector_config.begin(), d_channel_selector_config.end(), 1) != d_channel_selector_config.end())
-        {
-            std::cout << "A";
-        }
-    if (std::find(d_channel_selector_config.begin(), d_channel_selector_config.end(), 2) != d_channel_selector_config.end())
-        {
-            if (d_ls3w_CHN > 1)
-                {
-                    if (d_channel_selector_config.size() == 1)
+                    // Max bandwidth
+                    const auto ls4_bw_max = ini_reader->Get("config", "BW_MAX", empty_string);
+                    if (!ls4_bw_max.empty())
                         {
-                            std::cout << "B";
+                            std::stringstream ls4_bw_max_ss(ls4_bw_max);
+                            ls4_bw_max_ss >> d_ls4_BW_MAX;
+                            std::cout << "LabSat max bandwidth : " << d_ls4_BW_MAX << " Hz.\n";
                         }
-                    else
+
+                    for (auto &channel_map_it : d_channel_map)
                         {
-                            std::cout << ", B";
+                            auto &channel = channel_map_it.second;
+                            const auto bw_div_str = ini_reader->Get("config", "BW_DIV_" + channel.identifier, empty_string);
+
+                            if (!bw_div_str.empty())
+                                {
+                                    std::stringstream bw_div_ss(bw_div_str);
+                                    bw_div_ss >> channel.bw_div;
+                                    std::cout << "LabSat bandwidth div " << channel.identifier << " : " << channel.bw_div << ".\n";
+                                }
                         }
                 }
-            else
+        }
+
+    for (auto &channel_map_it : d_channel_map)
+        {
+            auto &channel = channel_map_it.second;
+            const auto channel_name = "channel " + channel.identifier;
+
+            if (ini_reader->HasSection(channel_name))
                 {
-                    std::cerr << "\nConfiguration error: RF channel B is selected but not found in data file.\n";
+                    const auto cf_str = ini_reader->Get(channel_name, "CF" + channel.identifier, empty_string);
+                    if (!cf_str.empty())
+                        {
+                            std::stringstream cf_ss(cf_str);
+                            cf_ss >> channel.center_freq;
+                            std::cout << "LabSat center frequency for RF " << channel_name << ": " << channel.center_freq << " Hz\n";
+                        }
+
+                    const auto bw_str = ini_reader->Get(channel_name, "BW" + channel.identifier, empty_string);
+                    if (!bw_str.empty())
+                        {
+                            std::stringstream bw_ss(bw_str);
+                            bw_ss >> channel.bandwidth;
+                            std::cout << "LabSat RF filter bandwidth for RF " << channel_name << ": " << channel.bandwidth << " Hz\n";
+                        }
+
+                    if (d_is_ls4)
+                        {
+                            const auto buffer_size_str = ini_reader->Get(channel_name, "BUF_SIZE_" + channel.identifier, empty_string);
+                            if (!buffer_size_str.empty())
+                                {
+                                    std::stringstream buff_size_ss(buffer_size_str);
+                                    buff_size_ss >> channel.buff_size;
+
+                                    if (channel.buff_size > 0)
+                                        {
+                                            if (channel.buff_size % sizeof(uint64_t) != 0)
+                                                {
+                                                    std::cerr << "\nConfiguration error: RF " << channel_name << " is BUFF SIZE is not a multiple of " << sizeof(uint64_t) << ".\n";
+                                                    std::cerr << "Exiting the program.\n";
+                                                    return -1;
+                                                }
+
+                                            channel.data.resize(channel.buff_size / sizeof(uint64_t));
+                                        }
+                                    std::cout << "LabSat RF BUFFER SIZE for RF " << channel_name << ": " << channel.buff_size << " bytes\n";
+                                }
+                        }
+                }
+        }
+
+    if (d_is_ls4)
+        {
+            d_number_register_per_output = d_ls3w_QUA == 12 ? 3 : 1;
+            d_number_sample_per_output = (d_number_register_per_output * 64) / (d_ls3w_QUA * 2);
+
+            std::vector<int32_t> bandwidths = {d_ls4_BW_MAX};
+            std::vector<int32_t> relative_buff_sizes;
+
+            for (const auto &channel_map_it : d_channel_map)
+                {
+                    const auto &channel = channel_map_it.second;
+                    bandwidths.emplace_back(channel.bandwidth * channel.bw_div + d_ls4_BW_MAX % channel.bw_div);
+                    relative_buff_sizes.emplace_back(channel.buff_size * channel.bw_div);
+                }
+
+            // LS4 bandwidths may be different between channels!
+            //     if (!are_equal_ignore_nonpositive(bandwidths))
+            //     {
+            //         std::cerr << "\nConfiguration error: Bandwidth configuration is invalid.\n";
+            //         std::cerr << "Exiting the program.\n";
+            //         return -1;
+            //     }
+            if (!are_equal_ignore_nonpositive(relative_buff_sizes))
+                {
+                    std::cerr << "\nConfiguration error: Buffer size configuration is invalid.\n";
                     std::cerr << "Exiting the program.\n";
                     return -1;
                 }
-        }
-    if (std::find(d_channel_selector_config.begin(), d_channel_selector_config.end(), 3) != d_channel_selector_config.end())
-        {
-            if (d_ls3w_CHN > 2)
+
+            std::vector<int32_t> selected_bw_divs;
+            selected_bw_divs.reserve(d_channel_selector_config.size());
+
+            for (const auto channel_id : d_channel_selector_config)
                 {
-                    if (d_channel_selector_config.size() == 1)
+                    selected_bw_divs.push_back(d_channel_map.at(channel_id).bw_div);
+                }
+
+            if (!are_equal_ignore_nonpositive(selected_bw_divs))
+                {
+                    if (d_channel_selector_config.size() > 1)
                         {
-                            std::cout << "C";
-                        }
-                    else
-                        {
-                            std::cout << ", C";
+                            std::cerr << "\nConfiguration error: Selecting multiple channels with different bandwidths is not supported.\n";
+                            std::cerr << "Exiting the program.\n";
+                            return -1;
                         }
                 }
-            else
+
+            const auto selected_bw_div = static_cast<double>(selected_bw_divs[0]);
+
+            for (auto &channel_map_it : d_channel_map)
                 {
-                    std::cerr << "\nConfiguration error: RF channel C is selected but not found in data file.\n";
+                    auto &channel = channel_map_it.second;
+
+                    if (channel.buff_size > 0)
+                        {
+                            // This ensures we increment the indices correctly when all channels do not have the same bandwidth
+                            channel.number_sample_per_output = d_number_register_per_output * (selected_bw_div / channel.bw_div);
+                        }
+                }
+        }
+
+    const std::set<int> channel_selector_config_set(d_channel_selector_config.begin(), d_channel_selector_config.end());
+    const std::vector<int> unique_channel_selector_config(channel_selector_config_set.begin(), channel_selector_config_set.end());
+    const auto selected_channel_count = static_cast<int>(unique_channel_selector_config.size());
+    std::cout << "LabSat selected channel" << ((selected_channel_count > 1) ? "s" : "") << ": ";
+
+    for (int i = 0; i < selected_channel_count; ++i)
+        {
+            const auto channel_id = unique_channel_selector_config.at(i);
+            const auto &channel_char = d_channel_map.at(channel_id).identifier;
+
+            if (channel_id > d_ls3w_CHN)
+                {
+                    std::cerr << "\nConfiguration error: RF channel " << channel_char << " is selected but not found in data file.\n";
                     std::cerr << "Exiting the program.\n";
                     return -1;
                 }
+
+            std::cout << channel_char << (i + 1 < selected_channel_count ? ", " : "");
         }
+
     std::cout << '\n';
 
     d_ls3w_samples_per_register = this->number_of_samples_per_ls3w_register();
-    d_ls3w_spare_bits = 64 - d_ls3w_samples_per_register * d_ls3w_QUA * 2;
+    d_ls3w_spare_bits = 64 - d_ls3w_samples_per_register * d_ls3w_CHN * d_ls3w_QUA * 2;
     for (auto ch_select : d_channel_selector_config)
         {
             d_ls3w_selected_channel_offset.push_back((ch_select - 1) * d_ls3w_QUA * 2);
@@ -739,191 +1036,268 @@ int labsat23_source::number_of_samples_per_ls3w_register() const
 
 void labsat23_source::decode_ls3w_register(uint64_t input, std::vector<gr_complex *> &out, size_t output_pointer) const
 {
-    std::bitset<64> bs(input);
-
-    // Earlier samples are written in the MSBs of the register. Bit-reverse the register
-    // for easier indexing. Note this bit-reverses individual samples as well for quant > 1 bit
-    for (std::size_t i = 0; i < 32; ++i)
-        {
-            bool t = bs[i];
-            bs[i] = bs[64 - i - 1];
-            bs[64 - i - 1] = t;
-        }
+    std::bitset<64> bs(input);  // Earlier samples are written in the MSBs of the register
 
     int output_chan = 0;
-    for (auto channel_offset : d_ls3w_selected_channel_offset)
+    for (const auto channel_offset : d_ls3w_selected_channel_offset)
         {
+            gr_complex *aux = out[output_chan];
+
             for (int i = 0; i < d_ls3w_samples_per_register; i++)
                 {
-                    float sampleI = 0.0;
-                    float sampleQ = 0.0;
-
                     const int bit_offset = d_ls3w_spare_bits + i * d_ls3w_SFT + channel_offset;
-                    switch (d_ls3w_QUA)
-                        {
-                        case 1:
-                            sampleI = bs[bit_offset] ? -1.0 : 1.0;
-                            sampleQ = bs[bit_offset + 1] ? -1.0 : 1.0;
-                            break;
-                        case 2:
-                            if (bs[bit_offset])
-                                {
-                                    if (bs[bit_offset + 1])  // 11
-                                        {
-                                            sampleI = -0.5;
-                                        }
-                                    else  // 10
-                                        {
-                                            sampleI = -1.0;
-                                        }
-                                }
-                            else
-                                {
-                                    if (bs[bit_offset + 1])  // 01
-                                        {
-                                            sampleI = 1.0;
-                                        }
-                                    else  // 00
-                                        {
-                                            sampleI = 0.5;
-                                        }
-                                }
-                            if (bs[bit_offset + 2])
-                                {
-                                    if (bs[bit_offset + 3])  // 11
-                                        {
-                                            sampleQ = -0.5;
-                                        }
-                                    else  // 10
-                                        {
-                                            sampleQ = -1.0;
-                                        }
-                                }
-                            else
-                                {
-                                    if (bs[bit_offset + 3])  // 01
-                                        {
-                                            sampleQ = 1.0;
-                                        }
-                                    else  // 00
-                                        {
-                                            sampleQ = 0.5;
-                                        }
-                                }
-                            break;
-
-                        case 3:
-                            if (bs[bit_offset])
-                                {
-                                    if (bs[bit_offset + 1])
-                                        {
-                                            if (bs[bit_offset + 2])  // 111
-                                                {
-                                                    sampleI = -0.25;
-                                                }
-                                            else  // 110
-                                                {
-                                                    sampleI = -0.5;
-                                                }
-                                        }
-                                    else
-                                        {
-                                            if (bs[bit_offset + 2])  // 101
-                                                {
-                                                    sampleI = -0.75;
-                                                }
-                                            else  // 100
-                                                {
-                                                    sampleI = -1.0;
-                                                }
-                                        }
-                                }
-                            else
-                                {
-                                    if (bs[bit_offset + 1])
-                                        {
-                                            if (bs[bit_offset + 2])  // 011
-                                                {
-                                                    sampleI = 1;
-                                                }
-                                            else  // 010
-                                                {
-                                                    sampleI = 0.75;
-                                                }
-                                        }
-                                    else
-                                        {
-                                            if (bs[bit_offset + 2])  // 001
-                                                {
-                                                    sampleI = 0.5;
-                                                }
-                                            else  // 000
-                                                {
-                                                    sampleI = 0.25;
-                                                }
-                                        }
-                                }
-                            if (bs[bit_offset + 3])
-                                {
-                                    if (bs[bit_offset + 4])
-                                        {
-                                            if (bs[bit_offset + 5])  // 111
-                                                {
-                                                    sampleQ = -0.25;
-                                                }
-                                            else  // 110
-                                                {
-                                                    sampleQ = -0.5;
-                                                }
-                                        }
-                                    else
-                                        {
-                                            if (bs[bit_offset + 5])  // 101
-                                                {
-                                                    sampleQ = -0.75;
-                                                }
-                                            else  // 100
-                                                {
-                                                    sampleQ = -1.0;
-                                                }
-                                        }
-                                }
-                            else
-                                {
-                                    if (bs[bit_offset + 4])
-                                        {
-                                            if (bs[bit_offset + 5])  // 011
-                                                {
-                                                    sampleQ = 1;
-                                                }
-                                            else  // 010
-                                                {
-                                                    sampleQ = 0.75;
-                                                }
-                                        }
-                                    else
-                                        {
-                                            if (bs[bit_offset + 5])  // 001
-                                                {
-                                                    sampleQ = 0.5;
-                                                }
-                                            else  // 000
-                                                {
-                                                    sampleQ = 0.25;
-                                                }
-                                        }
-                                }
-
-                            break;
-
-                        default:
-                            break;
-                        }
-                    gr_complex *aux = out[output_chan];
-                    aux[output_pointer + i] = gr_complex(sampleI, sampleQ);
+                    write_samples_from_bitset(bs, bit_offset, d_ls3w_QUA, aux[output_pointer + i]);
                 }
             output_chan++;
         }
+}
+
+int labsat23_source::parse_ls23_data(int noutput_items, std::vector<gr_complex *> out)
+{
+    if (d_header_parsed == false)
+        {
+            return parse_header();
+        }
+
+    // ready to start reading samples
+    switch (d_bits_per_sample)
+        {
+        case 2:
+            switch (d_channel_selector)
+                {
+                case 0:
+                    // dual channel 2 bits per complex sample
+                    // todo: implement dual channel reader
+                    break;
+                default:
+                    // single channel 2 bits per complex sample (1 bit I + 1 bit Q, 8 samples per int16)
+                    int n_int16_to_read = noutput_items / 8;
+                    if (n_int16_to_read > 0)
+                        {
+                            std::vector<int16_t> memblock(n_int16_to_read);
+                            binary_input_file.read(reinterpret_cast<char *>(memblock.data()), n_int16_to_read * 2);
+                            n_int16_to_read = static_cast<int>(binary_input_file.gcount()) / 2;  // from bytes to int16
+                            if (n_int16_to_read > 0)
+                                {
+                                    int output_pointer = 0;
+                                    for (int i = 0; i < n_int16_to_read; i++)
+                                        {
+                                            decode_samples_one_channel(memblock[i], out[0] + output_pointer, d_bits_per_sample);
+                                            output_pointer += 8;
+                                        }
+                                    return output_pointer;
+                                }
+
+                            // trigger the read of the next file in the sequence
+                            d_current_file_number++;
+                            if (d_labsat_version == 3)
+                                {
+                                    std::cout << "End of current file, reading the next LabSat file in sequence: " << generate_filename() << '\n';
+                                }
+                            binary_input_file.close();
+                            binary_input_file.open(generate_filename().c_str(), std::ios::in | std::ios::binary);
+                            if (binary_input_file.is_open())
+                                {
+                                    std::cout << "LabSat file source is reading samples from " << generate_filename() << '\n';
+                                    return 0;
+                                }
+
+                            if (d_labsat_version == 3)
+                                {
+                                    std::cout << "Last file reached, LabSat source stop\n";
+                                }
+                            else
+                                {
+                                    std::cout << "End of file reached, LabSat source stop\n";
+                                }
+
+                            d_queue->push(pmt::make_any(command_event_make(200, 0)));
+                            return -1;
+                        }
+                    else
+                        {
+                            return 0;
+                        }
+                }
+            break;
+        case 4:
+            switch (d_channel_selector)
+                {
+                case 0:
+                    // dual channel
+                    // todo: implement dual channel reader
+                    break;
+                default:
+                    // single channel 4 bits per complex sample (2 bit I + 2 bit Q, 4 samples per int16)
+                    int n_int16_to_read = noutput_items / 4;
+                    if (n_int16_to_read > 0)
+                        {
+                            std::vector<int16_t> memblock(n_int16_to_read);
+                            binary_input_file.read(reinterpret_cast<char *>(memblock.data()), n_int16_to_read * 2);
+                            n_int16_to_read = static_cast<int>(binary_input_file.gcount()) / 2;  // from bytes to int16
+                            if (n_int16_to_read > 0)
+                                {
+                                    int output_pointer = 0;
+                                    for (int i = 0; i < n_int16_to_read; i++)
+                                        {
+                                            decode_samples_one_channel(memblock[i], out[0] + output_pointer, d_bits_per_sample);
+                                            output_pointer += 4;
+                                        }
+                                    return output_pointer;
+                                }
+
+                            // trigger the read of the next file in the sequence
+                            d_current_file_number++;
+                            if (d_labsat_version == 3)
+                                {
+                                    std::cout << "End of current file, reading the next Labsat file in sequence: " << generate_filename() << '\n';
+                                }
+                            binary_input_file.close();
+                            binary_input_file.open(generate_filename().c_str(), std::ios::in | std::ios::binary);
+                            if (binary_input_file.is_open())
+                                {
+                                    std::cout << "Labsat file source is reading samples from " << generate_filename() << '\n';
+                                    return 0;
+                                }
+
+                            if (d_labsat_version == 3)
+                                {
+                                    std::cout << "Last file reached, LabSat source stop\n";
+                                }
+                            else
+                                {
+                                    std::cout << "End of file reached, LabSat source stop\n";
+                                }
+                            d_queue->push(pmt::make_any(command_event_make(200, 0)));
+                            return -1;
+                        }
+                    else
+                        {
+                            return 0;
+                        }
+                }
+            break;
+        default:
+            return -1;
+        }
+
+    return -1;
+}
+
+int labsat23_source::parse_ls3w_data(int noutput_items, std::vector<gr_complex *> out)
+{
+    if (binary_input_file.eof() == false)
+        {
+            // Integer division, any fractional part of the answer is discarded
+            int registers_to_read = noutput_items / d_ls3w_samples_per_register;
+            if (registers_to_read < 1)
+                {
+                    return 0;
+                }
+            std::size_t output_pointer = 0;
+            for (int i = 0; i < registers_to_read; i++)
+                {
+                    uint64_t read_register = 0ULL;
+                    // Labsat3W writes its 64-bit shift register to files in little endian. Read and convert to host endianness.
+                    read_file_register_to_local_endian(binary_input_file, read_register);
+
+                    if (binary_input_file.gcount() == 8)
+                        {
+                            decode_ls3w_register(read_register, out, output_pointer);
+                            output_pointer += d_ls3w_samples_per_register;
+                        }
+                    else
+                        {
+                            std::cout << "End of file reached, LabSat source stop.\n";
+                            d_queue->push(pmt::make_any(command_event_make(200, 0)));
+                            return -1;
+                        }
+                }
+            return output_pointer;
+        }
+    else
+        {
+            std::cout << "End of file reached, LabSat source stop.\n";
+            d_queue->push(pmt::make_any(command_event_make(200, 0)));
+            return -1;
+        }
+}
+
+int labsat23_source::parse_ls4_data(int noutput_items, std::vector<gr_complex *> out)
+{
+    if (binary_input_file.eof() == false)
+        {
+            int output_index = 0;
+            const int registers_to_read = noutput_items / d_number_sample_per_output;
+
+            for (int j = 0; j < registers_to_read; j++)
+                {
+                    uint64_t total_data_index = 0;
+
+                    for (const auto &channel_map_it : d_channel_map)
+                        {
+                            const auto &channel = channel_map_it.second;
+                            total_data_index += channel.data_index;
+                        }
+
+                    if (total_data_index >= d_read_index)
+                        {
+                            if (!read_ls4_data())
+                                {
+                                    std::cout << "End of file reached, LabSat source stop.\n";
+                                    d_queue->push(pmt::make_any(command_event_make(200, 0)));
+                                    return -1;
+                                }
+                        }
+
+                    for (size_t channel_index = 0; channel_index < d_channel_selector_config.size(); ++channel_index)
+                        {
+                            gr_complex *aux = out[channel_index];
+                            auto &channel = d_channel_map.at(d_channel_selector_config[channel_index]);
+                            write_samples_ls4(channel.data_index, output_index, d_number_sample_per_output, d_ls3w_QUA, channel.data, aux);
+                        }
+
+                    output_index += d_number_sample_per_output;
+
+                    for (auto &channel_map_it : d_channel_map)
+                        {
+                            auto &channel = channel_map_it.second;
+                            if (channel.buff_size > 0)
+                                {
+                                    channel.data_index += channel.number_sample_per_output;
+                                }
+                        }
+                }
+
+            return output_index;
+        }
+    else
+        {
+            std::cout << "End of file reached, LabSat source stop.\n";
+            d_queue->push(pmt::make_any(command_event_make(200, 0)));
+            return -1;
+        }
+}
+
+
+bool labsat23_source::read_ls4_data()
+{
+    for (auto &channel_map_it : d_channel_map)
+        {
+            auto &channel = channel_map_it.second;
+
+            if (channel.buff_size > 0)
+                {
+                    binary_input_file.read(reinterpret_cast<char *>(channel.data.data()), channel.buff_size);
+                    d_read_index += channel.data.size();
+                    if (binary_input_file.gcount() != channel.buff_size)
+                        {
+                            return false;
+                        }
+                }
+        }
+
+    return true;
 }
 
 
@@ -937,185 +1311,17 @@ int labsat23_source::general_work(int noutput_items,
         {
             out.push_back(reinterpret_cast<gr_complex *>(output_item));
         }
-    if (!d_is_ls3w)
+
+    if (!d_is_ls3w && !d_is_ls4)
         {
-            if (d_header_parsed == false)
-                {
-                    return parse_header();
-                }
-
-            // ready to start reading samples
-            switch (d_bits_per_sample)
-                {
-                case 2:
-                    switch (d_channel_selector)
-                        {
-                        case 0:
-                            // dual channel 2 bits per complex sample
-                            // todo: implement dual channel reader
-                            break;
-                        default:
-                            // single channel 2 bits per complex sample (1 bit I + 1 bit Q, 8 samples per int16)
-                            int n_int16_to_read = noutput_items / 8;
-                            if (n_int16_to_read > 0)
-                                {
-                                    std::vector<int16_t> memblock(n_int16_to_read);
-                                    binary_input_file.read(reinterpret_cast<char *>(memblock.data()), n_int16_to_read * 2);
-                                    n_int16_to_read = static_cast<int>(binary_input_file.gcount()) / 2;  // from bytes to int16
-                                    if (n_int16_to_read > 0)
-                                        {
-                                            int output_pointer = 0;
-                                            for (int i = 0; i < n_int16_to_read; i++)
-                                                {
-                                                    decode_samples_one_channel(memblock[i], out[0] + output_pointer, d_bits_per_sample);
-                                                    output_pointer += 8;
-                                                }
-                                            return output_pointer;
-                                        }
-
-                                    // trigger the read of the next file in the sequence
-                                    d_current_file_number++;
-                                    if (d_labsat_version == 3)
-                                        {
-                                            std::cout << "End of current file, reading the next LabSat file in sequence: " << generate_filename() << '\n';
-                                        }
-                                    binary_input_file.close();
-                                    binary_input_file.open(generate_filename().c_str(), std::ios::in | std::ios::binary);
-                                    if (binary_input_file.is_open())
-                                        {
-                                            std::cout << "LabSat file source is reading samples from " << generate_filename() << '\n';
-                                            return 0;
-                                        }
-
-                                    if (d_labsat_version == 3)
-                                        {
-                                            std::cout << "Last file reached, LabSat source stop\n";
-                                        }
-                                    else
-                                        {
-                                            std::cout << "End of file reached, LabSat source stop\n";
-                                        }
-
-                                    d_queue->push(pmt::make_any(command_event_make(200, 0)));
-                                    return -1;
-                                }
-                            else
-                                {
-                                    return 0;
-                                }
-                        }
-                    break;
-                case 4:
-                    switch (d_channel_selector)
-                        {
-                        case 0:
-                            // dual channel
-                            // todo: implement dual channel reader
-                            break;
-                        default:
-                            // single channel 4 bits per complex sample (2 bit I + 2 bit Q, 4 samples per int16)
-                            int n_int16_to_read = noutput_items / 4;
-                            if (n_int16_to_read > 0)
-                                {
-                                    std::vector<int16_t> memblock(n_int16_to_read);
-                                    binary_input_file.read(reinterpret_cast<char *>(memblock.data()), n_int16_to_read * 2);
-                                    n_int16_to_read = static_cast<int>(binary_input_file.gcount()) / 2;  // from bytes to int16
-                                    if (n_int16_to_read > 0)
-                                        {
-                                            int output_pointer = 0;
-                                            for (int i = 0; i < n_int16_to_read; i++)
-                                                {
-                                                    decode_samples_one_channel(memblock[i], out[0] + output_pointer, d_bits_per_sample);
-                                                    output_pointer += 4;
-                                                }
-                                            return output_pointer;
-                                        }
-
-                                    // trigger the read of the next file in the sequence
-                                    d_current_file_number++;
-                                    if (d_labsat_version == 3)
-                                        {
-                                            std::cout << "End of current file, reading the next Labsat file in sequence: " << generate_filename() << '\n';
-                                        }
-                                    binary_input_file.close();
-                                    binary_input_file.open(generate_filename().c_str(), std::ios::in | std::ios::binary);
-                                    if (binary_input_file.is_open())
-                                        {
-                                            std::cout << "Labsat file source is reading samples from " << generate_filename() << '\n';
-                                            return 0;
-                                        }
-
-                                    if (d_labsat_version == 3)
-                                        {
-                                            std::cout << "Last file reached, LabSat source stop\n";
-                                        }
-                                    else
-                                        {
-                                            std::cout << "End of file reached, LabSat source stop\n";
-                                        }
-                                    d_queue->push(pmt::make_any(command_event_make(200, 0)));
-                                    return -1;
-                                }
-                            else
-                                {
-                                    return 0;
-                                }
-                        }
-                    break;
-                default:
-                    return -1;
-                }
+            return parse_ls23_data(noutput_items, std::move(out));
         }
-    else  // Labsat 3 Wideband
+    else if (d_is_ls3w)  // Labsat 3 Wideband
         {
-            if (binary_input_file.eof() == false)
-                {
-                    // Integer division, any fractional part of the answer is discarded
-                    int registers_to_read = noutput_items / d_ls3w_samples_per_register;
-                    if (registers_to_read < 1)
-                        {
-                            return 0;
-                        }
-                    std::size_t output_pointer = 0;
-                    for (int i = 0; i < registers_to_read; i++)
-                        {
-                            uint64_t read_register = 0ULL;
-                            // Labsat3W writes its 64-bit shift register to files in little endian. Read and convert to host endianness.
-#if HAS_BOOST_ENDIAN
-                            binary_input_file.read(reinterpret_cast<char *>(&read_register), sizeof(read_register));
-                            boost::endian::little_to_native_inplace(read_register);
-#else
-                            std::array<char, 8> memory_block{};
-                            binary_input_file.read(memory_block.data(), 8);
-                            for (int k = 7; k >= 0; --k)
-                                {
-                                    read_register <<= 8;
-                                    read_register |= uint64_t(memory_block[k]);  // This is buggy if the MSB of the char is set.
-                                }
-#endif
-
-                            if (binary_input_file.gcount() == 8)
-                                {
-                                    decode_ls3w_register(read_register, out, output_pointer);
-                                    output_pointer += d_ls3w_samples_per_register;
-                                }
-                            else
-                                {
-                                    std::cout << "End of file reached, LabSat source stop.\n";
-                                    d_queue->push(pmt::make_any(command_event_make(200, 0)));
-                                    return -1;
-                                }
-                        }
-                    return output_pointer;
-                }
-            else
-                {
-                    std::cout << "End of file reached, LabSat source stop.\n";
-                    d_queue->push(pmt::make_any(command_event_make(200, 0)));
-                    return -1;
-                }
+            return parse_ls3w_data(noutput_items, std::move(out));
         }
-
-    std::cout << "Warning!!\n";
-    return 0;
+    else  // Labsat 4
+        {
+            return parse_ls4_data(noutput_items, std::move(out));
+        }
 }

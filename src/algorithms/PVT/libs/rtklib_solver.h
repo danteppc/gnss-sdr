@@ -61,6 +61,7 @@
 #include "pvt_solution.h"
 #include "rtklib.h"
 #include "rtklib_conversions.h"
+#include "sensor_data/sensor_data_aggregator.h"
 #include <array>
 #include <cstdint>
 #include <fstream>
@@ -84,13 +85,13 @@ public:
     Rtklib_Solver(const rtk_t& rtk,
         const Pvt_Conf& conf,
         const std::string& dump_filename,
-        uint32_t type_of_rx,
+        uint32_t signal_enabled_flags,
         bool flag_dump_to_file,
         bool flag_dump_to_mat);
 
     ~Rtklib_Solver();
 
-    bool get_PVT(const std::map<int, Gnss_Synchro>& gnss_observables_map, double kf_update_interval_s);
+    bool get_PVT(const std::map<int, Gnss_Synchro>& gnss_observables_map, double kf_update_interval_s, const SensorDataAggregator& sensor_data_aggregator);
 
     double get_hdop() const override;
     double get_vdop() const override;
@@ -154,7 +155,7 @@ private:
     Monitor_Pvt d_monitor_pvt{};
     Pvt_Conf d_conf;
     Pvt_Kf d_pvt_kf;
-    uint32_t d_type_of_rx;
+    uint32_t d_signal_enabled_flags;
     bool d_flag_dump_enabled;
     bool d_flag_dump_mat_enabled;
 };

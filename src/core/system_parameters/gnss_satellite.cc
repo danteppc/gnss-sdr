@@ -158,7 +158,7 @@ Gnss_Satellite& Gnss_Satellite::operator=(Gnss_Satellite&& other) noexcept
 
 void Gnss_Satellite::set_system(const std::string& system_)
 {
-    // Set the satellite system {"GPS", "Glonass", "SBAS", "Galileo", "Compass"}
+    // Set the satellite system {"GPS", "Glonass", "SBAS", "Galileo", "Beidou", "QZSS"}
     auto it = system_set.find(system_);
 
     if (it != system_set.cend())
@@ -167,7 +167,7 @@ void Gnss_Satellite::set_system(const std::string& system_)
         }
     else
         {
-            DLOG(INFO) << "System " << system_ << " is not defined {GPS, Glonass, SBAS, Galileo, Beidou}. Initialization?";
+            DLOG(INFO) << "System " << system_ << " is not defined {GPS, Glonass, SBAS, Galileo, Beidou, QZSS}. Initialization?";
             system = std::string("");
         }
 }
@@ -269,7 +269,18 @@ void Gnss_Satellite::set_PRN(uint32_t PRN_)
                     PRN = PRN_;
                 }
         }
-
+    else if (system == "QZSS")
+        {
+            if (PRN_ < 193 or PRN_ > 201)
+                {
+                    DLOG(INFO) << "This PRN is not defined";
+                    PRN = 0;
+                }
+            else
+                {
+                    PRN = PRN_;
+                }
+        }
     else
         {
             DLOG(INFO) << "System " << system << " is not defined";
@@ -303,7 +314,7 @@ uint32_t Gnss_Satellite::get_PRN() const
 
 std::string Gnss_Satellite::get_system() const
 {
-    // Get the satellite system {"GPS", "Glonass", "SBAS", "Galileo", "Beidou"}
+    // Get the satellite system {"GPS", "Glonass", "SBAS", "Galileo", "Beidou", "QZSS"}
     std::string system_ = system;
     return system_;
 }
@@ -311,7 +322,7 @@ std::string Gnss_Satellite::get_system() const
 
 std::string Gnss_Satellite::get_system_short() const
 {
-    // Get the satellite system {"G", "R", "S", "E", "C"}
+    // Get the satellite system {"G", "R", "S", "E", "C", "J"}
     return satelliteSystem.at(system);
 }
 
@@ -586,7 +597,7 @@ std::string Gnss_Satellite::what_block(const std::string& system_, uint32_t PRN_
                     block_ = std::string("FOC-FM14");  // Galileo Full Operational Capability (FOC) satellite FM14 / GSAT-0214, launched on November 17, 2016.
                     break;
                 case 6:
-                    block_ = std::string("FOC-FM27");  // Galileo Full Operational Capability (FOC) satellite FM27 / GSAT0227, launched on Apr. 28, 2024. UNDER COMMISSIONING.
+                    block_ = std::string("FOC-FM27");  // Galileo Full Operational Capability (FOC) satellite FM27 / GSAT0227, launched on Apr. 28, 2024.
                     break;
                 case 7:
                     block_ = std::string("FOC-FM7");  // Galileo Full Operational Capability (FOC) satellite FM7 / GSAT-0207, launched on November 17, 2016.
@@ -615,6 +626,9 @@ std::string Gnss_Satellite::what_block(const std::string& system_, uint32_t PRN_
                 case 15:
                     block_ = std::string("FOC-FM21");  // Galileo Full Operational Capability (FOC) satellite FM21 / GSAT0221, launched on Jul. 25, 2018.
                     break;
+                case 16:
+                    block_ = std::string("FOC-FM32");  // Galileo Full Operational Capability (FOC) satellite FM32 / GSAT0232, launched on Sep. 7, 2024.
+                    break;
                 case 18:
                     block_ = std::string("FOC-FM1*");  // Galileo Full Operational Capability (FOC) satellite FM1 / GSAT0201, launched into incorrect orbit on August 22, 2014. Moved to usable orbit in December, 2014. Not usable since 18/02/2021.
                     break;
@@ -630,6 +644,9 @@ std::string Gnss_Satellite::what_block(const std::string& system_, uint32_t PRN_
                 case 22:
                     block_ = std::string("FOC-FM4**");  // Galileo Full Operational Capability (FOC) satellite FM4 / GSAT0204, launched on March 27, 2015. REMOVED FROM ACTIVE SERVICE ON 2017-12-08 UNTIL FURTHER NOTICE FOR CONSTELLATION MANAGEMENT PURPOSES.
                     break;
+                case 23:
+                    block_ = std::string("FOC-FM26");  // Galileo Full Operational Capability (FOC) satellite FM26 / GSAT0226, launched on Sep. 7, 2024.
+                    break;
                 case 24:
                     block_ = std::string("FOC-FM5");  // Galileo Full Operational Capability (FOC) satellite FM5 / GSAT0205, launched on Sept. 11, 2015.
                     break;
@@ -643,7 +660,7 @@ std::string Gnss_Satellite::what_block(const std::string& system_, uint32_t PRN_
                     block_ = std::string("FOC-FM17");  // Galileo Full Operational Capability (FOC) satellite FM17 / GSAT0217, launched on Dec. 12, 2017.
                     break;
                 case 29:
-                    block_ = std::string("FOC-FM25");  // Galileo Full Operational Capability (FOC) satellite FM25 / GSAT0225, launched on Apr. 28, 2024. UNDER COMMISSIONING.
+                    block_ = std::string("FOC-FM25");  // Galileo Full Operational Capability (FOC) satellite FM25 / GSAT0225, launched on Apr. 28, 2024.
                     break;
                 case 30:
                     block_ = std::string("FOC-FM6");  // Galileo Full Operational Capability (FOC) satellite FM6 / GSAT0206, launched on Sept. 11, 2015.
@@ -806,6 +823,50 @@ std::string Gnss_Satellite::what_block(const std::string& system_, uint32_t PRN_
                     break;
                 case 61:
                     block_ = std::string("BeiDou-3 GEOG3");  // launched 2020/06/2023
+                    break;
+                default:
+                    block_ = std::string("Unknown");
+                }
+        }
+    if (system_ == "QZSS")
+        {
+            switch (PRN_)
+                {
+                case 193:
+                    block_ = std::string("I");  // QZSS-1 (Michibiki-1), launched on September 11, 2010.
+                    break;
+                case 194:
+                    block_ = std::string("II-Q");  // QZSS-2 (Michibiki-2)
+                    break;
+                case 195:
+                    block_ = std::string("II-Q");  // QZSS-3 (Michibiki-3)
+                    break;
+                case 196:
+                    block_ = std::string("IIA-Q");  // QZSS-4 (Michibiki-4)
+                    break;
+                case 197:
+                    block_ = std::string("III-Q");  // QZSS-1R (Michibiki-1R)
+                    break;
+                case 199:
+                    block_ = std::string("II-G");
+                    break;
+                case 200:
+                    block_ = std::string("III-G");
+                    break;
+                case 201:
+                    block_ = std::string("III-G");
+                    break;
+                case 203:
+                    block_ = std::string("IIA-Q");
+                    break;
+                case 204:
+                    block_ = std::string("III-Q");
+                    break;
+                case 205:
+                    block_ = std::string("III-G");
+                    break;
+                case 206:
+                    block_ = std::string("III-G");
                     break;
                 default:
                     block_ = std::string("Unknown");

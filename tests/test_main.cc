@@ -137,6 +137,7 @@ private:
 #include "unit-tests/system-parameters/glonass_gnav_ephemeris_test.cc"
 #include "unit-tests/system-parameters/glonass_gnav_nav_message_test.cc"
 #include "unit-tests/system-parameters/has_decoding_test.cc"
+#include "unit-tests/system-parameters/qzss_code_generation_test.cc"
 
 #ifndef EXCLUDE_TESTS_REQUIRING_BINARIES
 #include "unit-tests/control-plane/control_thread_test.cc"
@@ -152,7 +153,6 @@ private:
 #include "unit-tests/signal-processing-blocks/filter/pulse_blanking_filter_test.cc"
 #include "unit-tests/signal-processing-blocks/sources/file_signal_source_test.cc"
 #include "unit-tests/signal-processing-blocks/tracking/galileo_e1_dll_pll_veml_tracking_test.cc"
-#include "unit-tests/signal-processing-blocks/tracking/glonass_l1_ca_dll_pll_c_aid_tracking_test.cc"
 #include "unit-tests/signal-processing-blocks/tracking/glonass_l1_ca_dll_pll_tracking_test.cc"
 #endif
 

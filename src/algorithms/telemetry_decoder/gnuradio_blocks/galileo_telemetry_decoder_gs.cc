@@ -33,8 +33,8 @@
 #include "gnss_synchro.h"            // for Gnss_Synchro
 #include "tlm_crc_stats.h"           // for Tlm_CRC_Stats
 #include "tlm_utils.h"               // for save_tlm_matfile, tlm_remove_file
+#include "tow_to_trk.h"              // for TOW_to_trk
 #include "viterbi_decoder.h"         // for Viterbi_Decoder
-#include <gnuradio/io_signature.h>   // for gr::io_signature::make
 #include <pmt/pmt_sugar.h>           // for pmt::mp
 #include <array>                     // for std::array
 #include <cmath>                     // for std::fmod, std::abs
@@ -47,7 +47,6 @@
 #include <stdexcept>                 // for std::out_of_range
 #include <tuple>                     // for std::tuple
 #include <typeinfo>                  // for typeid
-#include <utility>                   // for std::pair
 
 #if USE_GLOG_AND_GFLAGS
 #include <glog/logging.h>
@@ -80,7 +79,8 @@ galileo_make_telemetry_decoder_gs(const Gnss_Satellite &satellite, const Tlm_Con
 galileo_telemetry_decoder_gs::galileo_telemetry_decoder_gs(
     const Gnss_Satellite &satellite,
     const Tlm_Conf &conf,
-    int frame_type) : gr::block("galileo_telemetry_decoder_gs", gr::io_signature::make(1, 1, sizeof(Gnss_Synchro)),
+    int frame_type) : telemetry_impl_interface("galileo_telemetry_decoder_gs",
+                          gr::io_signature::make(1, 1, sizeof(Gnss_Synchro)),
                           gr::io_signature::make(1, 1, sizeof(Gnss_Synchro))),
                       d_dump_filename(conf.dump_filename),
                       d_delta_t(0),
@@ -114,14 +114,10 @@ galileo_telemetry_decoder_gs::galileo_telemetry_decoder_gs(
                       d_E6_TOW_set(false),
                       d_there_are_e1_channels(conf.there_are_e1_channels),
                       d_there_are_e6_channels(conf.there_are_e6_channels),
-                      d_use_ced(conf.use_ced)
+                      d_use_ced(conf.use_ced),
+                      d_tow_to_trk(conf.tow_to_trk)
 {
-    // prevent telemetry symbols accumulation in output buffers
-    this->set_max_noutput_items(1);
-    // Ephemeris data port out
-    this->message_port_register_out(pmt::mp("telemetry"));
-    // Control messages to tracking block
-    this->message_port_register_out(pmt::mp("telemetry_to_trk"));
+    configure_basic_outputs();
 
     if (d_there_are_e1_channels)
         {
@@ -440,7 +436,7 @@ void galileo_telemetry_decoder_gs::decode_INAV_word(float *page_part_symbols, in
 
     // 4. Push the new navigation data to the queues
     // extract OSNMA bits, reset container.
-    if (d_inav_nav.get_osnma_adkd_0_12_nav_bits().size() == 549)
+    if (d_inav_nav.get_osnma_adkd_0_12_nav_bits().size() == 549 && d_band == '1')
         {
             DLOG(INFO) << "Galileo OSNMA: new ADKD=0/12 navData from " << d_satellite << " at TOW_sf=" << d_inav_nav.get_TOW5() - 25;
             const auto tmp_obj_osnma = std::make_shared<std::tuple<uint32_t, std::string, uint32_t>>(  // < PRNd , navDataBits, TOW_Sosf>
@@ -450,7 +446,7 @@ void galileo_telemetry_decoder_gs::decode_INAV_word(float *page_part_symbols, in
             this->message_port_pub(pmt::mp("OSNMA_from_TLM"), pmt::make_any(tmp_obj_osnma));
             d_inav_nav.reset_osnma_nav_bits_adkd0_12();
         }
-    if (d_inav_nav.get_osnma_adkd_4_nav_bits().size() == 141)
+    if (d_inav_nav.get_osnma_adkd_4_nav_bits().size() == 141 && d_band == '1')
         {
             DLOG(INFO) << "Galileo OSNMA: new ADKD=4 navData from " << d_satellite << " at TOW_sf=" << d_inav_nav.get_TOW6() - 5;
             const auto tmp_obj = std::make_shared<std::tuple<uint32_t, std::string, uint32_t>>(  // < PRNd , navDataBits, TOW_Sosf> // TODO conversion from W6 to W_Start_of_subframe
@@ -547,6 +543,7 @@ void galileo_telemetry_decoder_gs::decode_INAV_word(float *page_part_symbols, in
         {
             // get object for this SV (mandatory)
             const std::shared_ptr<Galileo_Utc_Model> tmp_obj = std::make_shared<Galileo_Utc_Model>(d_inav_nav.get_utc_model());
+            LOG(INFO) << "Galileo leap second Delta_tLS=" << tmp_obj->Delta_tLS;
             this->message_port_pub(pmt::mp("telemetry"), pmt::make_any(tmp_obj));
             if (d_band == '1')
                 {
@@ -704,6 +701,7 @@ void galileo_telemetry_decoder_gs::decode_FNAV_word(float *page_symbols, int32_t
     if (d_fnav_nav.have_new_utc_model() == true)
         {
             const std::shared_ptr<Galileo_Utc_Model> tmp_obj = std::make_shared<Galileo_Utc_Model>(d_fnav_nav.get_utc_model());
+            LOG(INFO) << "Galileo leap second Delta_tLS=" << tmp_obj->Delta_tLS;
             this->message_port_pub(pmt::mp("telemetry"), pmt::make_any(tmp_obj));
 #if __cplusplus == 201103L
             const int default_precision = std::cout.precision();
@@ -865,32 +863,9 @@ void galileo_telemetry_decoder_gs::set_channel(int32_t channel)
 {
     d_channel = channel;
     DLOG(INFO) << "Navigation channel set to " << channel;
-    // ############# ENABLE DATA FILE LOG #################
-    if (d_dump == true)
-        {
-            if (d_dump_file.is_open() == false)
-                {
-                    try
-                        {
-                            d_dump_filename.append(std::to_string(d_channel));
-                            d_dump_filename.append(".dat");
-                            d_dump_file.exceptions(std::ofstream::failbit | std::ofstream::badbit);
-                            d_dump_file.open(d_dump_filename.c_str(), std::ios::out | std::ios::binary);
-                            LOG(INFO) << "Telemetry decoder dump enabled on channel " << d_channel << " Log file: " << d_dump_filename.c_str();
-                        }
-                    catch (const std::ofstream::failure &e)
-                        {
-                            LOG(WARNING) << "channel " << d_channel << " Exception opening trk dump file " << e.what();
-                        }
-                }
-        }
 
-    if (d_dump_crc_stats)
-        {
-            // set the channel number for the telemetry CRC statistics
-            // disable the telemetry CRC statistics if there is a problem opening the output file
-            d_dump_crc_stats = d_Tlm_CRC_Stats->set_channel(d_channel);
-        }
+    configure_dump_file(d_channel, d_dump, d_dump_filename, d_dump_file);
+    configure_crc_stats_channel(d_channel, d_dump_crc_stats, d_Tlm_CRC_Stats);
 }
 
 
@@ -1104,7 +1079,8 @@ int galileo_telemetry_decoder_gs::general_work(int noutput_items __attribute__((
                             if (!d_flag_frame_sync)
                                 {
                                     d_flag_frame_sync = true;
-                                    DLOG(INFO) << " Frame sync SAT " << this->d_satellite;
+                                    LOG(INFO) << "Successful frame synchronization in channel " << d_channel << " for satellite " << this->d_satellite
+                                              << " at sample_counter=" << d_received_sample_counter;
                                 }
                         }
                     else
@@ -1447,6 +1423,32 @@ int galileo_telemetry_decoder_gs::general_work(int noutput_items __attribute__((
                             LOG(WARNING) << "Exception writing navigation data dump file " << e.what();
                         }
                 }
+
+            // SEND TOW TO THE TRACKING BLOCK
+            if (d_tow_to_trk)
+                {
+                    int32_t gal_week;
+                    switch (d_frame_type)
+                        {
+                        case 1:
+                            gal_week = d_inav_nav.get_Galileo_week();
+                            break;
+                        case 2:
+                            gal_week = d_fnav_nav.get_ephemeris().WN;
+                            break;
+                        default:
+                            gal_week = 0;
+                            break;
+                        }
+                    const std::shared_ptr<TOW_to_trk> tmp_tow_obj = std::make_shared<TOW_to_trk>(TOW_to_trk(
+                        std::string(current_symbol.Signal),
+                        d_channel,
+                        d_TOW_at_current_symbol_ms,
+                        current_symbol.Tracking_sample_counter,
+                        gal_week, d_satellite.get_PRN()));
+                    this->message_port_pub(pmt::mp("telemetry_to_trk"), pmt::make_any(tmp_tow_obj));
+                }
+
             // 3. Make the output (move the object contents to the GNURadio reserved memory)
             *out[0] = std::move(current_symbol);
             return 1;

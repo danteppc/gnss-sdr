@@ -100,7 +100,7 @@ GpsL2MPcpsAcquisitionTest_msg_rx::GpsL2MPcpsAcquisitionTest_msg_rx() : gr::block
     this->message_port_register_in(pmt::mp("events"));
     this->set_msg_handler(pmt::mp("events"),
 #if HAS_GENERIC_LAMBDA
-        [this](auto &&PH1) { msg_handler_channel_events(PH1); });
+        [this](auto &&PH1) { msg_handler_channel_events(std::forward<decltype(PH1)>(PH1)); });
 #else
 #if USE_BOOST_BIND_PLACEHOLDERS
         boost::bind(&GpsL2MPcpsAcquisitionTest_msg_rx::msg_handler_channel_events, this, boost::placeholders::_1));
@@ -329,18 +329,6 @@ TEST_F(GpsL2MPcpsAcquisitionTest, ValidationOfResults)
     }) << "Failure setting gnss_synchro.";
 
     ASSERT_NO_THROW({
-        acquisition->set_threshold(0.001);
-    }) << "Failure setting threshold.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_doppler_max(doppler_max);
-    }) << "Failure setting doppler_max.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_doppler_step(doppler_step);
-    }) << "Failure setting doppler_step.";
-
-    ASSERT_NO_THROW({
         acquisition->connect(top_block);
     }) << "Failure connecting acquisition to the top_block.";
 
@@ -363,8 +351,7 @@ TEST_F(GpsL2MPcpsAcquisitionTest, ValidationOfResults)
 
     ASSERT_NO_THROW({
         acquisition->set_local_code();
-        acquisition->set_state(1);  // Ensure that acquisition starts at the first sample
-        acquisition->init();
+        acquisition->reset();
     }) << "Failure set_state and init acquisition test";
 
     EXPECT_NO_THROW({

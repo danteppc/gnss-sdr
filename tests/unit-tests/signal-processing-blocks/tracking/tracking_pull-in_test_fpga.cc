@@ -119,7 +119,7 @@ TrackingPullInTest_msg_rx_Fpga::TrackingPullInTest_msg_rx_Fpga() : gr::block("Tr
     this->message_port_register_in(pmt::mp("events"));
     this->set_msg_handler(pmt::mp("events"),
 #if HAS_GENERIC_LAMBDA
-        [this](auto&& PH1) { msg_handler_channel_events(PH1); });
+        [this](auto&& PH1) { msg_handler_channel_events(std::forward<decltype(PH1)>(PH1)); });
 #else
 #if USE_BOOST_BIND_PLACEHOLDERS
         boost::bind(&TrackingPullInTest_msg_rx_Fpga::msg_handler_channel_events, this, boost::placeholders::_1));
@@ -535,6 +535,12 @@ void TrackingPullInTestFpga::configure_receiver(
     gnss_synchro.Channel_ID = 0;
     config->set_property("GNSS-SDR.internal_fs_sps", std::to_string(baseband_sampling_freq));
 
+#if USE_GLOG_AND_GFLAGS
+    config->set_property("Acquisition.threshold", std::to_string(FLAGS_external_signal_acquisition_threshold));
+#else
+    config->set_property("Acquisition.threshold", std::to_string(absl::GetFlag(FLAGS_external_signal_acquisition_threshold)));
+#endif
+
     std::string System_and_Signal;
     if (implementation == "GPS_L1_CA_DLL_PLL_Tracking_FPGA")
         {
@@ -695,17 +701,7 @@ bool TrackingPullInTestFpga::acquire_signal(int SV_ID)
     acquisition->set_gnss_synchro(&tmp_gnss_synchro);
     acquisition->set_channel_fsm(channel_fsm_);
     acquisition->set_channel(0);
-#if USE_GLOG_AND_GFLAGS
-    acquisition->set_doppler_max(config->property("Acquisition.doppler_max", FLAGS_external_signal_acquisition_doppler_max_hz));
-    acquisition->set_doppler_step(config->property("Acquisition.doppler_step", FLAGS_external_signal_acquisition_doppler_step_hz));
     acquisition->set_doppler_center(0);
-    acquisition->set_threshold(config->property("Acquisition.threshold", FLAGS_external_signal_acquisition_threshold));
-#else
-    acquisition->set_doppler_max(config->property("Acquisition.doppler_max", absl::GetFlag(FLAGS_external_signal_acquisition_doppler_max_hz)));
-    acquisition->set_doppler_step(config->property("Acquisition.doppler_step", absl::GetFlag(FLAGS_external_signal_acquisition_doppler_step_hz)));
-    acquisition->set_doppler_center(0);
-    acquisition->set_threshold(config->property("Acquisition.threshold", absl::GetFlag(FLAGS_external_signal_acquisition_threshold)));
-#endif
     std::chrono::time_point<std::chrono::system_clock> start, end;
     std::chrono::duration<double> elapsed_seconds;
     start = std::chrono::system_clock::now();
@@ -759,7 +755,6 @@ bool TrackingPullInTestFpga::acquire_signal(int SV_ID)
             channel_fsm_->Event_clear_test_result();
 
             acquisition->stop_acquisition();  // reset the whole system including the sample counters
-            acquisition->init();
             acquisition->set_local_code();
 
             if ((implementation == "GPS_L1_CA_DLL_PLL_Tracking_FPGA") or (implementation == "Galileo_E1_DLL_PLL_VEML_Tracking_FPGA"))
@@ -1314,7 +1309,12 @@ TEST_F(TrackingPullInTestFpga, ValidationOfResults)
                                                                 }
                                                             else
                                                                 {
-                                                                    g1.set_title("D_e=" + std::to_string(acq_doppler_error_hz_values.at(current_acq_doppler_error_idx)) + " [Hz] " + "T_e= " + std::to_string(acq_delay_error_chips_values.at(current_acq_doppler_error_idx).at(current_acq_code_error_idx)) + " [Chips], PLL/DLL BW: " + std::to_string(absl::GetFlag(FLAGS_PLL_bw_hz_start)) + "," + std::to_string(absl::GetFlag(FLAGS_DLL_bw_hz_start)) + " [Hz], (PRN #" + std::to_string(absl::GetFlag(FLAGS_test_satellite_PRN)) + ")");
+                                                                    // clang-format off
+                                                                    g1.set_title("D_e=" + std::to_string(acq_doppler_error_hz_values.at(current_acq_doppler_error_idx)) + " [Hz] "
+                                                                      + "T_e= " + std::to_string(acq_delay_error_chips_values.at(current_acq_doppler_error_idx).at(current_acq_code_error_idx)) 
+                                                                      + " [Chips], PLL/DLL BW: " + std::to_string(absl::GetFlag(FLAGS_PLL_bw_hz_start)) + ","
+                                                                      + std::to_string(absl::GetFlag(FLAGS_DLL_bw_hz_start)) + " [Hz], (PRN #" + std::to_string(absl::GetFlag(FLAGS_test_satellite_PRN)) + ")");
+                                                                    // clang-format on
                                                                 }
 #endif
                                                             g1.set_grid();
@@ -1337,7 +1337,7 @@ TEST_F(TrackingPullInTestFpga, ValidationOfResults)
 #if USE_GLOG_AND_GFLAGS
                                                             if (!FLAGS_enable_external_signal_file)
                                                                 {
-                                                                    g2.set_title(std::to_string(generator_CN0_values.at(current_cn0_idx)) + " dB-Hz Constellation " + "PLL/DLL BW: " + std::to_string(FLAGS_PLL_bw_hz_start) + "," + std::to_string(FLAGS_DLL_bw_hz_start) + " [Hz], (PRN #" + std::to_string(FLAGS_test_satellite_PRN) + ")");
+                                                                    g2.set_title(std::to_string(generator_CN0_values.at(current_cn0_idx)) + " dB-Hz " + "PLL/DLL BW: " + std::to_string(FLAGS_PLL_bw_hz_start) + "," + std::to_string(FLAGS_DLL_bw_hz_start) + " [Hz], (PRN #" + std::to_string(FLAGS_test_satellite_PRN) + ")");
                                                                 }
                                                             else
                                                                 {
@@ -1346,11 +1346,16 @@ TEST_F(TrackingPullInTestFpga, ValidationOfResults)
 #else
                                                             if (!absl::GetFlag(FLAGS_enable_external_signal_file))
                                                                 {
-                                                                    g2.set_title(std::to_string(generator_CN0_values.at(current_cn0_idx)) + " dB-Hz Constellation " + "PLL/DLL BW: " + std::to_string(absl::GetFlag(FLAGS_PLL_bw_hz_start)) + "," + std::to_string(absl::GetFlag(FLAGS_DLL_bw_hz_start)) + " [Hz], (PRN #" + std::to_string(absl::GetFlag(FLAGS_test_satellite_PRN)) + ")");
+                                                                    g2.set_title(std::to_string(generator_CN0_values.at(current_cn0_idx)) + " dB-Hz " + "PLL/DLL BW: " + std::to_string(absl::GetFlag(FLAGS_PLL_bw_hz_start)) + "," + std::to_string(absl::GetFlag(FLAGS_DLL_bw_hz_start)) + " [Hz], (PRN #" + std::to_string(absl::GetFlag(FLAGS_test_satellite_PRN)) + ")");
                                                                 }
                                                             else
                                                                 {
-                                                                    g2.set_title("D_e=" + std::to_string(acq_doppler_error_hz_values.at(current_acq_doppler_error_idx)) + " [Hz] " + "T_e= " + std::to_string(acq_delay_error_chips_values.at(current_acq_doppler_error_idx).at(current_acq_code_error_idx)) + " [Chips], PLL/DLL BW: " + std::to_string(absl::GetFlag(FLAGS_PLL_bw_hz_start)) + "," + std::to_string(absl::GetFlag(FLAGS_DLL_bw_hz_start)) + " [Hz], (PRN #" + std::to_string(absl::GetFlag(FLAGS_test_satellite_PRN)) + ")");
+                                                                    // clang-format off
+                                                                    g2.set_title("D_e=" + std::to_string(acq_doppler_error_hz_values.at(current_acq_doppler_error_idx)) + " [Hz] "
+                                                                      + "T_e= " + std::to_string(acq_delay_error_chips_values.at(current_acq_doppler_error_idx).at(current_acq_code_error_idx))
+                                                                      + " [Chips], PLL/DLL BW: " + std::to_string(absl::GetFlag(FLAGS_PLL_bw_hz_start)) + ","
+                                                                      + std::to_string(absl::GetFlag(FLAGS_DLL_bw_hz_start)) + " [Hz], (PRN #" + std::to_string(absl::GetFlag(FLAGS_test_satellite_PRN)) + ")");
+                                                                    // clang-format on
                                                                 }
 #endif
                                                             g2.set_grid();
@@ -1377,7 +1382,12 @@ TEST_F(TrackingPullInTestFpga, ValidationOfResults)
                                                                 }
                                                             else
                                                                 {
-                                                                    g3.set_title("D_e=" + std::to_string(acq_doppler_error_hz_values.at(current_acq_doppler_error_idx)) + " [Hz] " + "T_e= " + std::to_string(acq_delay_error_chips_values.at(current_acq_doppler_error_idx).at(current_acq_code_error_idx)) + " [Chips] PLL/DLL BW: " + std::to_string(absl::GetFlag(FLAGS_PLL_bw_hz_start)) + "," + std::to_string(absl::GetFlag(FLAGS_DLL_bw_hz_start)) + " [Hz], (PRN #" + std::to_string(absl::GetFlag(FLAGS_test_satellite_PRN)) + ")");
+                                                                    // clang-format off
+                                                                    g3.set_title("D_e=" + std::to_string(acq_doppler_error_hz_values.at(current_acq_doppler_error_idx)) + " [Hz] "
+                                                                      + "T_e= " + std::to_string(acq_delay_error_chips_values.at(current_acq_doppler_error_idx).at(current_acq_code_error_idx))
+                                                                      + " [Chips] PLL/DLL BW: " + std::to_string(absl::GetFlag(FLAGS_PLL_bw_hz_start)) + "," + std::to_string(absl::GetFlag(FLAGS_DLL_bw_hz_start))
+                                                                      + " [Hz], (PRN #" + std::to_string(absl::GetFlag(FLAGS_test_satellite_PRN)) + ")");
+                                                                    // clang-format on
                                                                 }
 #endif
                                                             g3.set_grid();
@@ -1410,7 +1420,12 @@ TEST_F(TrackingPullInTestFpga, ValidationOfResults)
                                                                 }
                                                             else
                                                                 {
-                                                                    g4.set_title("D_e=" + std::to_string(acq_doppler_error_hz_values.at(current_acq_doppler_error_idx)) + " [Hz] " + "T_e= " + std::to_string(acq_delay_error_chips_values.at(current_acq_doppler_error_idx).at(current_acq_code_error_idx)) + " [Chips] PLL/DLL BW: " + std::to_string(absl::GetFlag(FLAGS_PLL_bw_hz_start)) + "," + std::to_string(absl::GetFlag(FLAGS_DLL_bw_hz_start)) + " [Hz], (PRN #" + std::to_string(absl::GetFlag(FLAGS_test_satellite_PRN)) + ")");
+                                                                    // clang-format off
+                                                                    g4.set_title("D_e=" + std::to_string(acq_doppler_error_hz_values.at(current_acq_doppler_error_idx)) + " [Hz] "
+                                                                      + "T_e= " + std::to_string(acq_delay_error_chips_values.at(current_acq_doppler_error_idx).at(current_acq_code_error_idx))
+                                                                      + " [Chips] PLL/DLL BW: " + std::to_string(absl::GetFlag(FLAGS_PLL_bw_hz_start)) + ","
+                                                                      + std::to_string(absl::GetFlag(FLAGS_DLL_bw_hz_start)) + " [Hz], (PRN #" + std::to_string(absl::GetFlag(FLAGS_test_satellite_PRN)) + ")");
+                                                                    // clang-format on
                                                                 }
 #endif
                                                             g4.set_grid();

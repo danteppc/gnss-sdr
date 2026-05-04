@@ -190,7 +190,7 @@ FrontEndCal_msg_rx::FrontEndCal_msg_rx()
     this->message_port_register_in(pmt::mp("events"));
     this->set_msg_handler(pmt::mp("events"),
 #if HAS_GENERIC_LAMBDA
-        [this](auto&& PH1) { msg_handler_channel_events(PH1); });
+        [this](auto&& PH1) { msg_handler_channel_events(std::forward<decltype(PH1)>(PH1)); });
 #else
 #if USE_BOOST_BIND_PLACEHOLDERS
         boost::bind(&FrontEndCal_msg_rx::msg_handler_channel_events, this, boost::placeholders::_1));
@@ -473,14 +473,13 @@ int main(int argc, char** argv)
 
             int64_t fs_in_ = configuration->property("GNSS-SDR.internal_fs_sps", 2048000);
             configuration->set_property("Acquisition.max_dwells", "10");
+            configuration->set_property("Acquisition.doppler_max", "10000");
+            configuration->set_property("Acquisition.threshold", "2.0");
 
             auto acquisition = std::make_shared<GpsL1CaPcpsAcquisitionFineDoppler>(configuration.get(), "Acquisition", 1, 1);
 
             acquisition->set_channel(1);
             acquisition->set_gnss_synchro(&gnss_synchro);
-            acquisition->set_threshold(configuration->property("Acquisition.threshold", 2.0));
-            acquisition->set_doppler_max(configuration->property("Acquisition.doppler_max", 10000));
-            acquisition->set_doppler_step(configuration->property("Acquisition.doppler_step", 250));
 
             gr::block_sptr source;
             source = gr::blocks::file_source::make(sizeof(gr_complex), "tmp_capture.dat");
@@ -532,7 +531,6 @@ int main(int argc, char** argv)
                 {
                     gnss_synchro.PRN = PRN;
                     acquisition->set_gnss_synchro(&gnss_synchro);
-                    acquisition->init();
                     acquisition->set_local_code();
                     acquisition->reset();
                     stop = false;

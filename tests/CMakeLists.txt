@@ -11,6 +11,70 @@ include_directories("${GNSSSDR_SOURCE_DIR}/src/core/receiver")
 
 include(XcodeRemoveWarningDuplicates)
 
+if(CMAKE_VERSION VERSION_LESS "3.5")
+    include(CMakeParseArguments)
+endif()
+
+# Helper to fetch optional test data with integrity checking and optional uncompressing
+#
+# Arguments:
+#   url            - Remote file URL to download
+#   destination    - Absolute or relative path where the file will be stored
+#   expected_hash  - Hash string for EXPECTED_HASH, e.g. "SHA256=abcdef..." or "MD5=..."
+#
+# Optional keyword arguments (parsed via cmake_parse_arguments):
+#   EXTRACT_DIR    - Directory where the downloaded archive will be uncompressed with
+#                    `cmake -E tar xzf`. When omitted, no uncompressing is attempted.
+#
+# Behavior:
+#   * Creates the destination directory if it does not exist.
+#   * Skips downloading when the destination file is already present.
+#   * Removes the file if the download fails or the hash does not match.
+#   * Optionally uncompresses the archive into EXTRACT_DIR on successful download.
+function(download_test_file url destination expected_hash)
+    set(options)
+    set(oneValueArgs EXTRACT_DIR)
+    set(multiValueArgs)
+    cmake_parse_arguments(DOWNLOAD_TEST "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    get_filename_component(_filename "${destination}" NAME)
+    get_filename_component(_dest_dir "${destination}" DIRECTORY)
+
+    if(NOT EXISTS "${destination}")
+        if(_dest_dir)
+            file(MAKE_DIRECTORY "${_dest_dir}")
+        endif()
+        set(_download_args
+            "${url}"
+            "${destination}"
+            STATUS status_download
+            EXPECTED_HASH "${expected_hash}"
+        )
+        if(NOT CMAKE_VERSION VERSION_LESS "3.2")
+            list(APPEND _download_args SHOW_PROGRESS)
+        endif()
+
+        message(STATUS "Downloading file: ${_filename}")
+        file(DOWNLOAD ${_download_args})
+
+        list(GET status_download 0 result_download)
+        if(result_download EQUAL 0)
+            if(DOWNLOAD_TEST_EXTRACT_DIR)
+                file(MAKE_DIRECTORY "${DOWNLOAD_TEST_EXTRACT_DIR}")
+                execute_process(
+                    COMMAND ${CMAKE_COMMAND} -E tar xzf "${destination}"
+                    WORKING_DIRECTORY "${DOWNLOAD_TEST_EXTRACT_DIR}"
+                )
+            endif()
+        else()
+            file(REMOVE "${destination}")
+            message(WARNING "Failed to download ${_filename}: ${status_download}")
+        endif()
+    endif()
+endfunction()
+
+
+
 ################################################################################
 # Google Test - https://github.com/google/googletest
 ################################################################################
@@ -366,14 +430,14 @@ if(ENABLE_UNIT_TESTING_EXTRA OR ENABLE_SYSTEM_TESTING_EXTRA OR ENABLE_FPGA)
         if(CMAKE_VERSION VERSION_GREATER 3.17.0)
             set(GNSSTK_PATCH_COMMAND
                 cd ${GNSSSDR_BINARY_DIR}/thirdparty/gnsstk-${GNSSSDR_GNSSTK_LOCAL_VERSION} &&
-                ${Patch_EXECUTABLE} ${GNSSSDR_BINARY_DIR}/thirdparty/gnsstk-${GNSSSDR_GNSSTK_LOCAL_VERSION}/CMakeLists.txt < ${GNSSSDR_SOURCE_DIR}/tests/data/gnsstk_static14.patch &&
-                ${Patch_EXECUTABLE} ${GNSSSDR_BINARY_DIR}/thirdparty/gnsstk-${GNSSSDR_GNSSTK_LOCAL_VERSION}/core/lib/GNSSCore/ObsID.hpp < ${GNSSSDR_SOURCE_DIR}/tests/data/gnsstk_gcc13.patch
+                ${Patch_EXECUTABLE} ${GNSSSDR_BINARY_DIR}/thirdparty/gnsstk-${GNSSSDR_GNSSTK_LOCAL_VERSION}/CMakeLists.txt < ${GNSSSDR_SOURCE_DIR}/utils/patches/gnsstk_static15.patch &&
+                ${Patch_EXECUTABLE} ${GNSSSDR_BINARY_DIR}/thirdparty/gnsstk-${GNSSSDR_GNSSTK_LOCAL_VERSION}/core/lib/NewNav/GLOCNavHeader.hpp < ${GNSSSDR_SOURCE_DIR}/utils/patches/gnsstk_gcc15.patch
             )
         else()
             set(GNSSTK_PATCH_COMMAND
                 cd ${GNSSSDR_BINARY_DIR}/thirdparty/gnsstk-${GNSSSDR_GNSSTK_LOCAL_VERSION} &&
-                ${Patch_EXECUTABLE} ${GNSSSDR_BINARY_DIR}/thirdparty/gnsstk-${GNSSSDR_GNSSTK_LOCAL_VERSION}/CMakeLists.txt < ${GNSSSDR_SOURCE_DIR}/tests/data/gnsstk_static13.patch &&
-                ${Patch_EXECUTABLE} ${GNSSSDR_BINARY_DIR}/thirdparty/gnsstk-${GNSSSDR_GNSSTK_LOCAL_VERSION}/core/lib/GNSSCore/ObsID.hpp < ${GNSSSDR_SOURCE_DIR}/tests/data/gnsstk_gcc13.patch
+                ${Patch_EXECUTABLE} ${GNSSSDR_BINARY_DIR}/thirdparty/gnsstk-${GNSSSDR_GNSSTK_LOCAL_VERSION}/CMakeLists.txt < ${GNSSSDR_SOURCE_DIR}/utils/patches/gnsstk_static13.patch &&
+                ${Patch_EXECUTABLE} ${GNSSSDR_BINARY_DIR}/thirdparty/gnsstk-${GNSSSDR_GNSSTK_LOCAL_VERSION}/core/lib/GNSSCore/ObsID.hpp < ${GNSSSDR_SOURCE_DIR}/utils/patches/gnsstk_gcc13.patch
             )
         endif()
         # Patch only once
@@ -407,8 +471,8 @@ if(ENABLE_UNIT_TESTING_EXTRA OR ENABLE_SYSTEM_TESTING_EXTRA OR ENABLE_FPGA)
                     set(GNSSTK_PARALLEL_BUILD "-j${NUMBER_OF_PROCESSORS}")
                 endif()
             endif()
-            if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-                set(GNSSTK_FLAGS "-DCMAKE_CXX_FLAGS:STRING=-w")  # Fix for clang in aarch64
+            if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT WIN32)
+                set(GNSSTK_FLAGS "-DCMAKE_CXX_FLAGS:STRING=-w")
             endif()
             if(CMAKE_VERSION VERSION_GREATER 3.17.0)
                 set(GNSSTK_CXX_STANDARD 17)
@@ -480,134 +544,58 @@ endif()
 
 if(NOT (ENABLE_PACKAGING OR ENABLE_UNIT_TESTING_MINIMAL))
     message(STATUS "Downloading some data files for testing ...")
-    if(NOT EXISTS ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/Galileo_E1_ID_1_Fs_4Msps_8ms.dat)
-        message(STATUS "Downloading file: Galileo_E1_ID_1_Fs_4Msps_8ms.dat")
-        file(DOWNLOAD https://sourceforge.net/projects/gnss-sdr/files/data/Galileo_E1_ID_1_Fs_4Msps_8ms.dat
-                ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/Galileo_E1_ID_1_Fs_4Msps_8ms.dat
-            SHOW_PROGRESS
-            EXPECTED_HASH MD5=d57a02d3c7361bba2e137329b66458ef
-            STATUS status_download
-        )
-        list(GET status_download 0 result_download)
-        if(NOT (${result_download} EQUAL 0))
-            file(REMOVE ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/Galileo_E1_ID_1_Fs_4Msps_8ms.dat)
-        endif()
-    endif()
-    if(NOT EXISTS ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/GPS_L1_CA_ID_1_Fs_4Msps_2ms.dat)
-        message(STATUS "Downloading file: GPS_L1_CA_ID_1_Fs_4Msps_2ms.dat")
-        file(DOWNLOAD https://sourceforge.net/projects/gnss-sdr/files/data/GPS_L1_CA_ID_1_Fs_4Msps_2ms.dat
-                ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/GPS_L1_CA_ID_1_Fs_4Msps_2ms.dat
-            SHOW_PROGRESS
-            EXPECTED_HASH MD5=f12ada80a2ad1bab061262e010643529
-            STATUS status_download
-        )
-        list(GET status_download 0 result_download)
-        if(NOT (${result_download} EQUAL 0))
-            file(REMOVE ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/GPS_L1_CA_ID_1_Fs_4Msps_2ms.dat)
-        endif()
-    endif()
-    if(NOT EXISTS ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/GSoC_CTTC_capture_2012_07_26_4Msps_4ms.dat)
-        message(STATUS "Downloading file: GSoC_CTTC_capture_2012_07_26_4Msps_4ms.dat")
-        file(DOWNLOAD https://sourceforge.net/projects/gnss-sdr/files/data/GSoC_CTTC_capture_2012_07_26_4Msps_4ms.dat
-                ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/GSoC_CTTC_capture_2012_07_26_4Msps_4ms.dat
-            SHOW_PROGRESS
-            EXPECTED_HASH MD5=b98d6d82885354f168f279817de284b5
-            STATUS status_download
-        )
-        list(GET status_download 0 result_download)
-        if(NOT (${result_download} EQUAL 0))
-            file(REMOVE ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/GSoC_CTTC_capture_2012_07_26_4Msps_4ms.dat)
-        endif()
-    endif()
-    if(NOT EXISTS ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/NT1065_GLONASS_L1_20160831_fs6625e6_if0e3_4ms.bin)
-        message(STATUS "Downloading file: NT1065_GLONASS_L1_20160831_fs6625e6_if0e3_4ms.bin")
-        file(DOWNLOAD https://sourceforge.net/projects/gnss-sdr/files/data/NT1065_GLONASS_L1_20160831_fs6625e6_if0e3_4ms.bin
-                ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/NT1065_GLONASS_L1_20160831_fs6625e6_if0e3_4ms.bin
-            SHOW_PROGRESS
-            EXPECTED_HASH MD5=0e2dc212309141d236897bc0af187074
-            STATUS status_download
-        )
-        list(GET status_download 0 result_download)
-        if(NOT (${result_download} EQUAL 0))
-            file(REMOVE ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/NT1065_GLONASS_L1_20160831_fs6625e6_if0e3_4ms.bin)
-        endif()
-    endif()
+    download_test_file(
+        https://sourceforge.net/projects/gnss-sdr/files/data/Galileo_E1_ID_1_Fs_4Msps_8ms.dat
+        ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/Galileo_E1_ID_1_Fs_4Msps_8ms.dat
+        MD5=d57a02d3c7361bba2e137329b66458ef
+    )
+    download_test_file(
+        https://sourceforge.net/projects/gnss-sdr/files/data/GPS_L1_CA_ID_1_Fs_4Msps_2ms.dat
+        ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/GPS_L1_CA_ID_1_Fs_4Msps_2ms.dat
+        MD5=f12ada80a2ad1bab061262e010643529
+    )
+    download_test_file(
+        https://sourceforge.net/projects/gnss-sdr/files/data/GSoC_CTTC_capture_2012_07_26_4Msps_4ms.dat
+        ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/GSoC_CTTC_capture_2012_07_26_4Msps_4ms.dat
+        MD5=b98d6d82885354f168f279817de284b5
+    )
+    download_test_file(
+        https://sourceforge.net/projects/gnss-sdr/files/data/NT1065_GLONASS_L1_20160831_fs6625e6_if0e3_4ms.bin
+        ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/NT1065_GLONASS_L1_20160831_fs6625e6_if0e3_4ms.bin
+        MD5=0e2dc212309141d236897bc0af187074
+    )
     message(STATUS "Done.")
 endif()
 
 if(ENABLE_UNIT_TESTING_EXTRA)
     add_definitions(-DEXTRA_TESTS)
     message(STATUS "Downloading some extra data files for testing ...")
-    if(NOT EXISTS ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/gps_l2c_m_prn7_5msps.dat)
-        message(STATUS "Downloading file: gps_l2c_m_prn7_5msps.dat")
-        file(DOWNLOAD https://sourceforge.net/projects/gnss-sdr/files/data/gps_l2c_m_prn7_5msps.dat
-                ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/gps_l2c_m_prn7_5msps.dat
-            SHOW_PROGRESS
-            EXPECTED_HASH MD5=a6fcbefe155137945d3c33c5ef7bd0f9
-            STATUS status_download
-        )
-        list(GET status_download 0 result_download)
-        if(NOT (${result_download} EQUAL 0))
-            file(REMOVE ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/gps_l2c_m_prn7_5msps.dat)
-        endif()
-    endif()
-    if(NOT EXISTS ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/Glonass_L1_CA_SIM_Fs_62Msps_4ms.dat)
-        message(STATUS "Downloading file: Glonass_L1_CA_SIM_Fs_62Msps_4ms.dat")
-        file(DOWNLOAD https://sourceforge.net/projects/gnss-sdr/files/data/Glonass_L1_CA_SIM_Fs_62Msps_4ms.dat
-                ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/Glonass_L1_CA_SIM_Fs_62Msps_4ms.dat
-            SHOW_PROGRESS
-            EXPECTED_HASH MD5=ffb72fc63c116be58d5e5ccb1daaed3a
-            STATUS status_download
-        )
-        list(GET status_download 0 result_download)
-        if(NOT (${result_download} EQUAL 0))
-            file(REMOVE ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/Glonass_L1_CA_SIM_Fs_62Msps_4ms.dat)
-        endif()
-    endif()
-    if(NOT EXISTS ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/BdsB1IStr01_fs25e6_if0_4ms.dat)
-        message(STATUS "Downloading file: BdsB1IStr01_fs25e6_if0_4ms.dat")
-        file(DOWNLOAD https://sourceforge.net/projects/gnss-sdr/files/data/BdsB1IStr01_fs25e6_if0_4ms.dat
-                ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/BdsB1IStr01_fs25e6_if0_4ms.dat
-            SHOW_PROGRESS
-            EXPECTED_HASH MD5=5a4336dad9d80f3313a16dec4fff9233
-            STATUS status_download
-        )
-        list(GET status_download 0 result_download)
-        if(NOT (${result_download} EQUAL 0))
-            file(REMOVE ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/BdsB1IStr01_fs25e6_if0_4ms.dat)
-        endif()
-    endif()
-    if(NOT EXISTS ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/BdsB3IStr01_fs50e6_if0_4ms.dat)
-        message(STATUS "Downloading file: BdsB3IStr01_fs50e6_if0_4ms.dat")
-        file(DOWNLOAD https://sourceforge.net/projects/gnss-sdr/files/data/BdsB3IStr01_fs50e6_if0_4ms.dat
-                ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/BdsB3IStr01_fs50e6_if0_4ms.dat
-            SHOW_PROGRESS
-            EXPECTED_HASH MD5=066d0d8434a8bc81e161778b7c34cc07
-            STATUS status_download
-        )
-        list(GET status_download 0 result_download)
-        if(NOT (${result_download} EQUAL 0))
-            file(REMOVE ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/BdsB3IStr01_fs50e6_if0_4ms.dat)
-        endif()
-    endif()
-    if(NOT EXISTS ${GNSSSDR_BINARY_DIR}/thirdparty/osnma_tests/Test_vectors.zip)
-        message(STATUS "Downloading file: Test_vectors.zip")
-        file(DOWNLOAD https://www.gsc-europa.eu/sites/default/files/sites/all/files/Test_vectors.zip
-                ${GNSSSDR_BINARY_DIR}/thirdparty/osnma_tests/Test_vectors.zip
-            SHOW_PROGRESS
-            EXPECTED_HASH MD5=8158aebee735652c9398e5bb6d944364
-            STATUS status_download
-        )
-        list(GET status_download 0 result_download)
-        if(${result_download} EQUAL 0)
-            execute_process(
-                COMMAND ${CMAKE_COMMAND} -E tar xzf ${GNSSSDR_BINARY_DIR}/thirdparty/osnma_tests/Test_vectors.zip
-                WORKING_DIRECTORY ${GNSSSDR_BINARY_DIR}/thirdparty/osnma_tests/
-            )
-        else()
-            file(REMOVE ${GNSSSDR_BINARY_DIR}/thirdparty/osnma_tests/Test_vectors.zip)
-        endif()
-    endif()
+    download_test_file(
+        https://sourceforge.net/projects/gnss-sdr/files/data/gps_l2c_m_prn7_5msps.dat
+        ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/gps_l2c_m_prn7_5msps.dat
+        MD5=a6fcbefe155137945d3c33c5ef7bd0f9
+    )
+    download_test_file(
+        https://sourceforge.net/projects/gnss-sdr/files/data/Glonass_L1_CA_SIM_Fs_62Msps_4ms.dat
+        ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/Glonass_L1_CA_SIM_Fs_62Msps_4ms.dat
+        MD5=ffb72fc63c116be58d5e5ccb1daaed3a
+    )
+    download_test_file(
+        https://sourceforge.net/projects/gnss-sdr/files/data/BdsB1IStr01_fs25e6_if0_4ms.dat
+        ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/BdsB1IStr01_fs25e6_if0_4ms.dat
+        MD5=5a4336dad9d80f3313a16dec4fff9233
+    )
+    download_test_file(
+        https://sourceforge.net/projects/gnss-sdr/files/data/BdsB3IStr01_fs50e6_if0_4ms.dat
+        ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/BdsB3IStr01_fs50e6_if0_4ms.dat
+        MD5=066d0d8434a8bc81e161778b7c34cc07
+    )
+    download_test_file(
+        https://www.gsc-europa.eu/sites/default/files/sites/all/files/Test_vectors.zip
+        ${GNSSSDR_BINARY_DIR}/thirdparty/osnma_tests/Test_vectors.zip
+        MD5=8158aebee735652c9398e5bb6d944364
+        EXTRACT_DIR ${GNSSSDR_BINARY_DIR}/thirdparty/osnma_tests/
+    )
     message(STATUS "Done.")
     if(ENABLE_INSTALL_TESTS)
         install(FILES ${GNSSSDR_BINARY_DIR}/thirdparty/signal_samples/gps_l2c_m_prn7_5msps.dat DESTINATION share/gnss-sdr/signal_samples)
@@ -629,6 +617,7 @@ if(NOT ENABLE_PACKAGING)
     else()
         file(COPY ${GNSSSDR_SOURCE_DIR}/tests/data/rtklib_test/obs_test1.xml DESTINATION ${GNSSSDR_BINARY_DIR}/thirdparty/data/rtklib_test)
         file(COPY ${GNSSSDR_SOURCE_DIR}/tests/data/rtklib_test/eph_GPS_L1CA_test1.xml DESTINATION ${GNSSSDR_BINARY_DIR}/thirdparty/data/rtklib_test)
+        file(COPY ${GNSSSDR_SOURCE_DIR}/tests/data/config_file_sample.txt DESTINATION ${GNSSSDR_BINARY_DIR}/thirdparty/data)
         add_definitions(-DTEST_PATH="${GNSSSDR_BINARY_DIR}/thirdparty/")
     endif()
 endif()
@@ -1045,9 +1034,10 @@ if(NOT ENABLE_PACKAGING AND NOT ENABLE_FPGA)
 
     xcode_remove_warning_duplicates(flowgraph_test)
 
-    add_test(flowgraph_test flowgraph_test)
-
-    set_property(TEST flowgraph_test PROPERTY TIMEOUT 30)
+    if(NOT ENABLE_UNIT_TESTING_MINIMAL)
+        add_test(flowgraph_test flowgraph_test)
+        set_property(TEST flowgraph_test PROPERTY TIMEOUT 30)
+    endif()
 endif()
 
 
@@ -1107,9 +1097,10 @@ if(NOT ENABLE_PACKAGING AND NOT ENABLE_FPGA)
 
     xcode_remove_warning_duplicates(gnss_block_test)
 
-    add_test(gnss_block_test gnss_block_test)
-
-    set_property(TEST gnss_block_test PROPERTY TIMEOUT 60)
+    if(NOT ENABLE_UNIT_TESTING_MINIMAL)
+        add_test(gnss_block_test gnss_block_test)
+        set_property(TEST gnss_block_test PROPERTY TIMEOUT 60)
+    endif()
 endif()
 
 
@@ -1249,7 +1240,10 @@ if(NOT ENABLE_PACKAGING AND NOT ENABLE_FPGA)
 
     xcode_remove_warning_duplicates(acq_test)
 
-    add_test(acq_test acq_test)
+    if(NOT ENABLE_UNIT_TESTING_MINIMAL)
+        add_test(acq_test acq_test)
+        set_property(TEST acq_test PROPERTY TIMEOUT 30)
+    endif()
 
     if(USE_GENERIC_LAMBDAS)
         set(has_generic_lambdas HAS_GENERIC_LAMBDA=1)
@@ -1271,7 +1265,6 @@ if(NOT ENABLE_PACKAGING AND NOT ENABLE_FPGA)
                 -DUSE_BOOST_BIND_PLACEHOLDERS=1
         )
     endif()
-    set_property(TEST acq_test PROPERTY TIMEOUT 30)
 endif()
 
 
@@ -1352,9 +1345,10 @@ if(NOT ENABLE_PACKAGING AND NOT ENABLE_FPGA)
 
     xcode_remove_warning_duplicates(trk_test)
 
-    add_test(trk_test trk_test)
-
-    set_property(TEST trk_test PROPERTY TIMEOUT 30)
+    if(NOT ENABLE_UNIT_TESTING_MINIMAL)
+        add_test(trk_test trk_test)
+        set_property(TEST trk_test PROPERTY TIMEOUT 30)
+    endif()
 endif()
 
 #########################################################
@@ -1390,9 +1384,10 @@ if(NOT ENABLE_PACKAGING AND NOT ENABLE_FPGA)
 
     xcode_remove_warning_duplicates(control_thread_test)
 
-    add_test(control_thread_test control_thread_test)
-
-    set_property(TEST control_thread_test PROPERTY TIMEOUT 30)
+    if(NOT ENABLE_UNIT_TESTING_MINIMAL)
+        add_test(control_thread_test control_thread_test)
+        set_property(TEST control_thread_test PROPERTY TIMEOUT 30)
+    endif()
 endif()
 
 #########################################################
@@ -1403,15 +1398,22 @@ else()
     if(ENABLE_FPGA)
         add_dependencies(check matio_test)
     else()
-        add_dependencies(check
-            control_thread_test
-            flowgraph_test
-            gnss_block_test
-            gnuradio_block_test
-            acq_test
-            trk_test
-            matio_test
-        )
+        if(ENABLE_UNIT_TESTING_MINIMAL)
+            add_dependencies(check
+                gnuradio_block_test
+                matio_test
+            )
+        else()
+            add_dependencies(check
+                control_thread_test
+                flowgraph_test
+                gnss_block_test
+                gnuradio_block_test
+                acq_test
+                trk_test
+                matio_test
+            )
+        endif()
     endif()
 endif()
 

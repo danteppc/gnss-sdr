@@ -94,7 +94,7 @@ GlonassL1CaPcpsAcquisitionTest_msg_rx::GlonassL1CaPcpsAcquisitionTest_msg_rx() :
     this->message_port_register_in(pmt::mp("events"));
     this->set_msg_handler(pmt::mp("events"),
 #if HAS_GENERIC_LAMBDA
-        [this](auto&& PH1) { msg_handler_channel_events(PH1); });
+        [this](auto&& PH1) { msg_handler_channel_events(std::forward<decltype(PH1)>(PH1)); });
 #else
 #if USE_BOOST_BIND_PLACEHOLDERS
         boost::bind(&GlonassL1CaPcpsAcquisitionTest_msg_rx::msg_handler_channel_events, this, boost::placeholders::_1));
@@ -164,7 +164,7 @@ void GlonassL1CaPcpsAcquisitionTest::init()
     config->set_property("Acquisition_1G.dump", "true");
     config->set_property("Acquisition_1G.dump_filename", "./acquisition");
     config->set_property("Acquisition_1G.implementation", "Glonass_L1_CA_PCPS_Acquisition");
-    config->set_property("Acquisition_1G.threshold", "0.001");
+    config->set_property("Acquisition_1G.threshold", "0.005");
     config->set_property("Acquisition_1G.doppler_max", "5000");
     config->set_property("Acquisition_1G.doppler_step", "500");
     config->set_property("Acquisition_1G.repeat_satellite", "false");
@@ -235,24 +235,11 @@ TEST_F(GlonassL1CaPcpsAcquisitionTest, ValidationOfResults)
     }) << "Failure setting gnss_synchro.";
 
     ASSERT_NO_THROW({
-        acquisition->set_threshold(0.005);
-    }) << "Failure setting threshold.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_doppler_max(10000);
-    }) << "Failure setting doppler_max.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_doppler_step(500);
-    }) << "Failure setting doppler_step.";
-
-    ASSERT_NO_THROW({
         acquisition->connect(top_block);
     }) << "Failure connecting acquisition to the top_block.";
 
     acquisition->set_local_code();
-    acquisition->set_state(1);  // Ensure that acquisition starts at the first sample
-    acquisition->init();
+    acquisition->reset();
 
     ASSERT_NO_THROW({
         std::string path = std::string(TEST_PATH);

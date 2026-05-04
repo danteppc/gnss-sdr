@@ -52,7 +52,7 @@ public:
     std::string udp_eph_addresses;
     std::string log_source_timetag_file;
 
-    uint32_t type_of_receiver = 0;
+    uint32_t signal_enabled_flags = 0;
     uint32_t observable_interval_ms = 20;
 
     int32_t output_rate_ms = 0;
@@ -103,6 +103,9 @@ public:
     double measures_ecef_vel_sd_ms = 0.1;
     double system_ecef_pos_sd_m = 0.01;
     double system_ecef_vel_sd_ms = 0.001;
+
+    // Sensor Data parameters
+    bool kf_use_imu_vel = false;
 };
 
 

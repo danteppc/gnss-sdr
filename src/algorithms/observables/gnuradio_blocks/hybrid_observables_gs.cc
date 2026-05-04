@@ -16,6 +16,7 @@
  */
 
 #include "hybrid_observables_gs.h"
+#include "GLONASS_L1_L2_CA.h"
 #include "MATH_CONSTANTS.h"  // for SPEED_OF_LIGHT_M_S, TWO_PI
 #include "gnss_circular_deque.h"
 #include "gnss_frequencies.h"
@@ -23,8 +24,9 @@
 #include "gnss_sdr_filesystem.h"
 #include "gnss_sdr_make_unique.h"
 #include "gnss_synchro.h"
+#include "matlab_writter_helper.h"
+#include "sensor_data/sensor_identifier.h"
 #include <gnuradio/io_signature.h>
-#include <matio.h>
 #include <pmt/pmt.h>
 #include <algorithm>  // for std::min
 #include <array>
@@ -104,6 +106,7 @@ hybrid_observables_gs::hybrid_observables_gs(const Obs_Conf &conf_)
     d_channel_last_pll_lock = std::vector<bool>(d_nchannels_out, false);
     d_channel_last_pseudorange_smooth = std::vector<double>(d_nchannels_out, 0.0);
     d_channel_last_carrier_phase_rads = std::vector<double>(d_nchannels_out, 0.0);
+    d_channel_last_rx_time_valid = std::vector<bool>(d_nchannels_out, false);
 
     d_SourceTagTimestamps = std::vector<std::queue<GnssTime>>(d_nchannels_out);
 
@@ -215,6 +218,7 @@ void hybrid_observables_gs::msg_handler_pvt_to_observables(const pmt::pmt_t &msg
                         {
                             d_gnss_synchro_history->clear(n);
                         }
+                    std::fill(d_channel_last_rx_time_valid.begin(), d_channel_last_rx_time_valid.end(), false);
 
                     LOG(INFO) << "Corrected new RX Time offset: " << static_cast<int>(round(new_rx_clock_offset_s * 1000.0)) << "[ms]";
                 }
@@ -231,6 +235,7 @@ void hybrid_observables_gs::msg_handler_pvt_to_observables(const pmt::pmt_t &msg
                                 {
                                     d_gnss_synchro_history->clear(n);
                                 }
+                            std::fill(d_channel_last_rx_time_valid.begin(), d_channel_last_rx_time_valid.end(), false);
                             LOG(INFO) << "Received reset observables TOW command from PVT";
                             break;
                         default:
@@ -337,7 +342,6 @@ int32_t hybrid_observables_gs::save_matfile() const
 
     // WRITE MAT FILE
     mat_t *matfp;
-    matvar_t *matvar;
     std::string filename = d_dump_filename;
     if (filename.size() > 4)
         {
@@ -348,33 +352,14 @@ int32_t hybrid_observables_gs::save_matfile() const
     if (reinterpret_cast<int64_t *>(matfp) != nullptr)
         {
             std::array<size_t, 2> dims{static_cast<size_t>(d_nchannels_out), static_cast<size_t>(num_epoch)};
-            matvar = Mat_VarCreate("RX_time", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), RX_time_aux.data(), MAT_F_DONT_COPY_DATA);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
 
-            matvar = Mat_VarCreate("TOW_at_current_symbol_s", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), TOW_at_current_symbol_s_aux.data(), MAT_F_DONT_COPY_DATA);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("Carrier_Doppler_hz", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), Carrier_Doppler_hz_aux.data(), MAT_F_DONT_COPY_DATA);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("Carrier_phase_cycles", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), Carrier_phase_cycles_aux.data(), MAT_F_DONT_COPY_DATA);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("Pseudorange_m", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), Pseudorange_m_aux.data(), MAT_F_DONT_COPY_DATA);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("PRN", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), PRN_aux.data(), MAT_F_DONT_COPY_DATA);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("Flag_valid_pseudorange", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), Flag_valid_pseudorange_aux.data(), MAT_F_DONT_COPY_DATA);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
+            write_matlab_var<2>("RX_time", RX_time_aux.data(), matfp, dims);
+            write_matlab_var<2>("TOW_at_current_symbol_s", TOW_at_current_symbol_s_aux.data(), matfp, dims);
+            write_matlab_var<2>("Carrier_Doppler_hz", Carrier_Doppler_hz_aux.data(), matfp, dims);
+            write_matlab_var<2>("Carrier_phase_cycles", Carrier_phase_cycles_aux.data(), matfp, dims);
+            write_matlab_var<2>("Pseudorange_m", Pseudorange_m_aux.data(), matfp, dims);
+            write_matlab_var<2>("PRN", PRN_aux.data(), matfp, dims);
+            write_matlab_var<2>("Flag_valid_pseudorange", Flag_valid_pseudorange_aux.data(), matfp, dims);
         }
     Mat_Close(matfp);
 
@@ -606,6 +591,97 @@ void hybrid_observables_gs::smooth_pseudoranges(std::vector<Gnss_Synchro> &data)
 }
 
 
+void hybrid_observables_gs::detect_cycle_slips(std::vector<Gnss_Synchro> &data, uint64_t rx_clock)
+{
+    constexpr double kCycleSlipThresholdCycles = 0.5;
+
+    std::vector<double> residuals;
+    std::vector<uint32_t> channels;
+    residuals.reserve(data.size());
+    channels.reserve(data.size());
+
+    for (auto &obs : data)
+        {
+            obs.Flag_cycle_slip = false;
+        }
+
+    for (uint32_t n = 0; n < d_nchannels_out; n++)
+        {
+            auto &obs = data[n];
+            if (!obs.Flag_valid_pseudorange || obs.fs == 0LL)
+                {
+                    continue;
+                }
+
+            const auto step_samples = static_cast<uint64_t>(llround(d_T_rx_step_s * static_cast<double>(obs.fs)));
+            if (step_samples == 0 || rx_clock <= step_samples)
+                {
+                    continue;
+                }
+
+            Gnss_Synchro prev_obs{};
+            if (!interp_trk_obs(prev_obs, n, rx_clock - step_samples))
+                {
+                    continue;
+                }
+
+            const double current_phase_cycles = obs.Carrier_phase_rads / TWO_PI;
+            const double previous_phase_cycles = prev_obs.Carrier_phase_rads / TWO_PI;
+            const double delta_phase_cycles = current_phase_cycles - previous_phase_cycles;
+
+            double doppler_hz = obs.Carrier_Doppler_hz;
+            if (obs.System == 'R')
+                {
+                    const std::string signal(obs.Signal, 2);
+                    const auto it_prn = GLONASS_PRN.find(obs.PRN);
+                    if (it_prn != GLONASS_PRN.cend())
+                        {
+                            if (signal == "1G")
+                                {
+                                    doppler_hz += DFRQ1_GLO * it_prn->second;
+                                }
+                            else if (signal == "2G")
+                                {
+                                    doppler_hz += DFRQ2_GLO * it_prn->second;
+                                }
+                        }
+                }
+
+            const double residual = delta_phase_cycles + doppler_hz * d_T_rx_step_s;
+            residuals.push_back(residual);
+            channels.push_back(n);
+        }
+
+    if (residuals.empty())
+        {
+            return;
+        }
+
+    std::vector<double> sorted_residuals = residuals;
+    std::sort(sorted_residuals.begin(), sorted_residuals.end());
+    const size_t mid = sorted_residuals.size() / 2;
+    const double offset = (sorted_residuals.size() % 2 == 0)
+                              ? 0.5 * (sorted_residuals[mid - 1] + sorted_residuals[mid])
+                              : sorted_residuals[mid];
+
+    for (size_t i = 0; i < residuals.size(); i++)
+        {
+            if (std::abs(residuals[i] - offset) > kCycleSlipThresholdCycles)
+                {
+                    data[channels[i]].Flag_cycle_slip = true;
+                    if (data[channels[i]].Flag_valid_pseudorange)
+                        {
+                            LOG(INFO) << "Cycle slip detected on channel " << channels[i]
+                                      << " at RX time " << data[channels[i]].RX_time
+                                      << " s, for satellite " << data[channels[i]].System
+                                      << data[channels[i]].PRN
+                                      << ", signal " << std::string(data[channels[i]].Signal, 2);
+                        }
+                }
+        }
+}
+
+
 void hybrid_observables_gs::set_tag_timestamp_in_sdr_timeframe(const std::vector<Gnss_Synchro> &data, uint64_t rx_clock)
 {
     // it transforms the HW sample tag timestamp from a relative samplestamp (from receiver start)
@@ -657,6 +733,45 @@ void hybrid_observables_gs::set_tag_timestamp_in_sdr_timeframe(const std::vector
         }
 }
 
+void hybrid_observables_gs::propagate_sensor_data(const std::vector<Gnss_Synchro> &data)
+{
+    static pmt::pmt_t SAMPLE_STAMP_KEY = pmt::mp(SensorIdentifier::to_string(SensorIdentifier::SAMPLE_STAMP));
+    uint64_t current_sample = 0;
+    for (const Gnss_Synchro &item : data)
+        {
+            current_sample = std::max(current_sample, item.Tracking_sample_counter);
+        }
+
+    if (d_trq_last_sample == 0)
+        {
+            d_trq_last_sample = current_sample;
+            while (!d_sensor_data_tags.empty())
+                {
+                    d_sensor_data_tags.pop();
+                }
+            return;
+        }
+    while (!d_sensor_data_tags.empty())
+        {
+            auto &tag = d_sensor_data_tags.front();
+            uint64_t tag_sample = pmt::to_uint64(pmt::dict_ref(tag.value, SAMPLE_STAMP_KEY, pmt::from_uint64(0)));
+
+            if (tag_sample <= current_sample)
+                {
+                    if (tag_sample > d_trq_last_sample)
+                        {
+                            add_item_tag(0, this->nitems_written(0) + 1, tag.key, tag.value);
+                        }
+                    d_sensor_data_tags.pop();
+                }
+            else
+                {
+                    break;
+                }
+        }
+    d_trq_last_sample = current_sample;
+}
+
 
 int hybrid_observables_gs::general_work(int noutput_items __attribute__((unused)),
     gr_vector_int &ninput_items, gr_vector_const_void_star &input_items,
@@ -671,9 +786,17 @@ int hybrid_observables_gs::general_work(int noutput_items __attribute__((unused)
         {
             d_Rx_clock_buffer.push_back(in[d_nchannels_in - 1][0].Tracking_sample_counter);
 
-            // time tags
             std::vector<gr::tag_t> tags_vec;
-            this->get_tags_in_range(tags_vec, d_nchannels_in - 1, this->nitems_read(d_nchannels_in - 1), this->nitems_read(d_nchannels_in - 1) + 1);
+            // Propagate sensor data tags
+            get_tags_in_range(tags_vec, d_nchannels_in - 1, this->nitems_read(d_nchannels_in - 1), this->nitems_read(d_nchannels_in - 1) + ninput_items[d_nchannels_in - 1], pmt::mp("sensor_data"));
+            for (const auto &tag : tags_vec)
+                {
+                    d_sensor_data_tags.emplace(tag);
+                }
+
+            // time tags
+            tags_vec.clear();
+            this->get_tags_in_range(tags_vec, d_nchannels_in - 1, this->nitems_read(d_nchannels_in - 1), this->nitems_read(d_nchannels_in - 1) + 1, pmt::mp("timetag"));
             for (const auto &it : tags_vec)
                 {
                     try
@@ -745,6 +868,7 @@ int hybrid_observables_gs::general_work(int noutput_items __attribute__((unused)
                                     if (d_gnss_synchro_history->front(n).PRN != in[n][m].PRN)
                                         {
                                             d_gnss_synchro_history->clear(n);
+                                            d_channel_last_rx_time_valid[n] = false;
                                             // LOG(INFO) << "Channel " << d_gnss_synchro_history->front(n).Channel_ID << " changed satellite to PRN " << in[n][m].PRN;
                                         }
                                 }
@@ -794,12 +918,18 @@ int hybrid_observables_gs::general_work(int noutput_items __attribute__((unused)
                 {
                     compute_pranges(epoch_data);
                     set_tag_timestamp_in_sdr_timeframe(epoch_data, d_Rx_clock_buffer.front());
+                    propagate_sensor_data(epoch_data);
                 }
 
             // Carrier smoothing (optional)
             if (d_conf.enable_carrier_smoothing == true)
                 {
                     smooth_pseudoranges(epoch_data);
+                }
+
+            if (n_valid > 0)
+                {
+                    detect_cycle_slips(epoch_data, d_Rx_clock_buffer.front());
                 }
 
             // output the observables set to the PVT block

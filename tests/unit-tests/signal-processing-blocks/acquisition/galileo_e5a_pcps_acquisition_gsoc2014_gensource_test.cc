@@ -98,7 +98,7 @@ GalileoE5aPcpsAcquisitionGSoC2014GensourceTest_msg_rx::GalileoE5aPcpsAcquisition
     this->message_port_register_in(pmt::mp("events"));
     this->set_msg_handler(pmt::mp("events"),
 #if HAS_GENERIC_LAMBDA
-        [this](auto&& PH1) { msg_handler_channel_events(PH1); });
+        [this](auto&& PH1) { msg_handler_channel_events(std::forward<decltype(PH1)>(PH1)); });
 #else
 #if USE_BOOST_BIND_PLACEHOLDERS
         boost::bind(&GalileoE5aPcpsAcquisitionGSoC2014GensourceTest_msg_rx::msg_handler_channel_events, this, boost::placeholders::_1));
@@ -272,7 +272,7 @@ void GalileoE5aPcpsAcquisitionGSoC2014GensourceTest::config_1()
     config->set_property("Acquisition_5X.CAF_window_hz", std::to_string(CAF_window_hz));
     config->set_property("Acquisition_5X.Zero_padding", std::to_string(Zero_padding));
     config->set_property("Acquisition_5X.pfa", "0.003");
-    //    config->set_property("Acquisition_5X.threshold", "0.01");
+    config->set_property("Acquisition_5X.threshold", "0.0001");
     config->set_property("Acquisition_5X.doppler_max", "10000");
     config->set_property("Acquisition_5X.doppler_step", "250");
     config->set_property("Acquisition_5X.bit_transition_flag", "false");
@@ -586,18 +586,6 @@ TEST_F(GalileoE5aPcpsAcquisitionGSoC2014GensourceTest, ValidationOfSIM)
     }) << "Failure setting gnss_synchro.";
 
     ASSERT_NO_THROW({
-        acquisition->set_doppler_max(config->property("Acquisition_5X.doppler_max", 5000));
-    }) << "Failure setting doppler_max.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_doppler_step(config->property("Acquisition_5X.doppler_step", 100));
-    }) << "Failure setting doppler_step.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_threshold(config->property("Acquisition_5X.threshold", 0.0001));
-    }) << "Failure setting threshold.";
-
-    ASSERT_NO_THROW({
         acquisition->connect(top_block);
     }) << "Failure connecting acquisition to the top_block.";
 
@@ -614,7 +602,6 @@ TEST_F(GalileoE5aPcpsAcquisitionGSoC2014GensourceTest, ValidationOfSIM)
     }) << "Failure connecting the blocks of acquisition test.";
 
     acquisition->reset();
-    acquisition->init();
 
     // i = 0 --> satellite in acquisition is visible
     // i = 1 --> satellite in acquisition is not visible
@@ -638,7 +625,7 @@ TEST_F(GalileoE5aPcpsAcquisitionGSoC2014GensourceTest, ValidationOfSIM)
 
             acquisition->set_gnss_synchro(&gnss_synchro);
             acquisition->set_local_code();
-            acquisition->set_state(1);
+            acquisition->reset();
             start_queue();
 
             EXPECT_NO_THROW({

@@ -77,8 +77,12 @@ private:
     void update_TOW(const std::vector<Gnss_Synchro>& data);
     void compute_pranges(std::vector<Gnss_Synchro>& data) const;
     void smooth_pseudoranges(std::vector<Gnss_Synchro>& data);
+    void detect_cycle_slips(std::vector<Gnss_Synchro>& data, uint64_t rx_clock);
 
     void set_tag_timestamp_in_sdr_timeframe(const std::vector<Gnss_Synchro>& data, uint64_t rx_clock);
+
+    void propagate_sensor_data(const std::vector<Gnss_Synchro>& data);
+
     int32_t save_matfile() const;
 
     Obs_Conf d_conf;
@@ -90,9 +94,13 @@ private:
     std::vector<std::queue<GnssTime>> d_SourceTagTimestamps;
     std::queue<GnssTime> d_TimeChannelTagTimestamps;
 
+    std::queue<gr::tag_t> d_sensor_data_tags;
+    std::uint64_t d_trq_last_sample{0};
+
     std::vector<bool> d_channel_last_pll_lock;
     std::vector<double> d_channel_last_pseudorange_smooth;
     std::vector<double> d_channel_last_carrier_phase_rads;
+    std::vector<bool> d_channel_last_rx_time_valid;
 
     std::string d_dump_filename;
 

@@ -335,17 +335,13 @@ bool GalileoE1PcpsAmbiguousAcquisitionTestFpga::acquire_signal()
     acquisition->set_gnss_synchro(&tmp_gnss_synchro);
     acquisition->set_channel_fsm(channel_fsm_);
     acquisition->set_channel(1);
-    acquisition->set_doppler_max(doppler_max);
-    acquisition->set_doppler_step(doppler_step);
     acquisition->set_doppler_center(0);
-    acquisition->set_threshold(0.001);
 
     nsamples_to_transfer = static_cast<unsigned int>(std::round(static_cast<double>(BASEBAND_SAMPLING_FREQ) / (GALILEO_E1_CODE_CHIP_RATE_CPS / GALILEO_E1_B_CODE_LENGTH_CHIPS)));
 
     channel_fsm_->Event_clear_test_result();
 
     acquisition->stop_acquisition();  // reset the whole system including the sample counters
-    acquisition->init();
     acquisition->set_local_code();
 
     args.skip_used_samples = 0;
@@ -398,7 +394,7 @@ void GalileoE1PcpsAmbiguousAcquisitionTestFpga::init()
 {
     config->set_property("GNSS-SDR.internal_fs_sps", "4000000");
     config->set_property("Acquisition.implementation", "Galileo_E1_PCPS_Ambiguous_Acquisition_FPGA");
-    config->set_property("Acquisition.threshold", "0.00001");
+    config->set_property("Acquisition.threshold", "0.001");
     config->set_property("Acquisition.doppler_max", std::to_string(doppler_max));
     config->set_property("Acquisition.doppler_step", std::to_string(doppler_step));
     config->set_property("Acquisition.repeat_satellite", "false");

@@ -36,6 +36,7 @@
 #include <chrono>
 #include <memory>
 #include <thread>
+#include <utility>
 #if HAS_GENERIC_LAMBDA
 #else
 #include <boost/bind/bind.hpp>
@@ -100,7 +101,7 @@ GpsL1CaPcpsOpenClAcquisitionGSoC2013Test_msg_rx::GpsL1CaPcpsOpenClAcquisitionGSo
     this->message_port_register_in(pmt::mp("events"));
     this->set_msg_handler(pmt::mp("events"),
 #if HAS_GENERIC_LAMBDA
-        [this](auto&& PH1) { msg_handler_channel_events(PH1); });
+        [this](auto&& PH1) { msg_handler_channel_events(std::forward<decltype(PH1)>(PH1)); });
 #else
 #if USE_BOOST_BIND_PLACEHOLDERS
         boost::bind(&GpsL1CaPcpsOpenClAcquisitionGSoC2013Test_msg_rx::msg_handler_channel_events, this, boost::placeholders::_1));
@@ -482,22 +483,8 @@ TEST_F(GpsL1CaPcpsOpenClAcquisitionGSoC2013Test, ValidationOfResults)
     }) << "Failure setting gnss_synchro.";
 
     ASSERT_NO_THROW({
-        acquisition->set_doppler_max(config->property("Acquisition_1C.doppler_max", 10000));
-    }) << "Failure setting doppler_max.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_doppler_step(config->property("Acquisition_1C.doppler_step", 500));
-    }) << "Failure setting doppler_step.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_threshold(config->property("Acquisition_1C.threshold", 0.0));
-    }) << "Failure setting threshold.";
-
-    ASSERT_NO_THROW({
         acquisition->connect(top_block);
     }) << "Failure connecting acquisition to the top_block.";
-
-    acquisition->init();
 
     if (!acquisition->opencl_ready())
         {
@@ -570,22 +557,9 @@ TEST_F(GpsL1CaPcpsOpenClAcquisitionGSoC2013Test, ValidationOfResultsProbabilitie
     }) << "Failure setting gnss_synchro.";
 
     ASSERT_NO_THROW({
-        acquisition->set_doppler_max(config->property("Acquisition_1C.doppler_max", 10000));
-    }) << "Failure setting doppler_max.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_doppler_step(config->property("Acquisition_1C.doppler_step", 500));
-    }) << "Failure setting doppler_step.";
-
-    ASSERT_NO_THROW({
-        acquisition->set_threshold(config->property("Acquisition_1C.threshold", 0.0));
-    }) << "Failure setting threshold.";
-
-    ASSERT_NO_THROW({
         acquisition->connect(top_block);
     }) << "Failure connecting acquisition to the top_block.";
 
-    acquisition->init();
     if (!acquisition->opencl_ready())
         {
             std::cout << "OpenCL Platform is not ready.\n";

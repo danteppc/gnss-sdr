@@ -20,20 +20,13 @@
 
 #include "GLONASS_L1_L2_CA.h"
 #include "glonass_gnav_navigation_message.h"
-#include "gnss_block_interface.h"
-#include "gnss_satellite.h"
 #include "gnss_synchro.h"
 #include "nav_message_packet.h"
+#include "telemetry_impl_interface.h"
 #include "tlm_conf.h"
-#include "tlm_crc_stats.h"
 #include <boost/circular_buffer.hpp>
-#include <gnuradio/block.h>
 #include <gnuradio/types.h>  // for gr_vector_const_void_star
 #include <array>
-#include <cstdint>
-#include <fstream>
-#include <memory>  // for std::unique_ptr
-#include <string>
 
 /** \addtogroup Telemetry_Decoder
  * \{ */
@@ -54,13 +47,13 @@ glonass_l2_ca_telemetry_decoder_gs_sptr glonass_l2_ca_make_telemetry_decoder_gs(
  * \see <a href="http://russianspacesystems.ru/wp-content/uploads/2016/08/ICD_GLONASS_eng_v5.1.pdf">GLONASS ICD</a>
  *
  */
-class glonass_l2_ca_telemetry_decoder_gs : public gr::block
+class glonass_l2_ca_telemetry_decoder_gs : public telemetry_impl_interface
 {
 public:
-    ~glonass_l2_ca_telemetry_decoder_gs() override;       //!< Class destructor
-    void set_satellite(const Gnss_Satellite &satellite);  //!< Set satellite PRN
-    void set_channel(int32_t channel);                    //!< Set receiver's channel
-    inline void reset() {};
+    ~glonass_l2_ca_telemetry_decoder_gs() override;                //!< Class destructor
+    void set_satellite(const Gnss_Satellite &satellite) override;  //!< Set satellite PRN
+    void set_channel(int32_t channel) override;                    //!< Set receiver's channel
+    inline void reset() override {};
 
     /*!
      * \brief This is where all signal processing takes place
@@ -75,16 +68,11 @@ private:
 
     glonass_l2_ca_telemetry_decoder_gs(const Gnss_Satellite &satellite, const Tlm_Conf &conf);
 
-    const std::array<uint16_t, GLONASS_GNAV_PREAMBLE_LENGTH_BITS> d_preambles_bits{GLONASS_GNAV_PREAMBLE};
-
-    const int32_t d_symbols_per_preamble = GLONASS_GNAV_PREAMBLE_LENGTH_SYMBOLS;
-
-    void decode_string(const double *symbols, int32_t frame_length, double cn0);
+    const std::array<int16_t, GLONASS_GNAV_PREAMBLE_LENGTH_BITS> d_preambles_bits{GLONASS_GNAV_PREAMBLE_SAMPLES};
+    void decode_string(const double *symbols, double cn0);
 
     // Storage for incoming data
     boost::circular_buffer<Gnss_Synchro> d_symbol_history;
-
-    std::array<int32_t, GLONASS_GNAV_PREAMBLE_LENGTH_SYMBOLS> d_preambles_symbols{};
 
     // Navigation Message variable
     Glonass_Gnav_Navigation_Message d_nav;
@@ -113,6 +101,7 @@ private:
     bool d_remove_dat;
     bool d_enable_navdata_monitor;
     bool d_dump_crc_stats;
+    bool d_tow_to_trk;
 };
 
 

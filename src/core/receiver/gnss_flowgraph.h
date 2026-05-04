@@ -40,6 +40,7 @@
 #include <memory>                       // for for shared_ptr, dynamic_pointer_cast
 #include <mutex>                        // for mutex
 #include <string>                       // for string
+#include <unordered_map>                // for unordered_map
 #include <utility>                      // for pair
 #include <vector>                       // for vector
 #if ENABLE_FPGA
@@ -243,20 +244,9 @@ private:
     gnss_sdr_fpga_sample_counter_sptr ch_out_fpga_sample_counter_;
 #endif
 
-    std::vector<unsigned int> channels_state_;
+    std::vector<unsigned int> channels_state_;  // 0 - Idle, 1 - Assigned, 2 - Acquisition, 3 - Tracking
 
-    std::list<Gnss_Signal> available_GPS_1C_signals_;
-    std::list<Gnss_Signal> available_GPS_2S_signals_;
-    std::list<Gnss_Signal> available_GPS_L5_signals_;
-    std::list<Gnss_Signal> available_SBAS_1C_signals_;
-    std::list<Gnss_Signal> available_GAL_1B_signals_;
-    std::list<Gnss_Signal> available_GAL_5X_signals_;
-    std::list<Gnss_Signal> available_GAL_7X_signals_;
-    std::list<Gnss_Signal> available_GAL_E6_signals_;
-    std::list<Gnss_Signal> available_GLO_1G_signals_;
-    std::list<Gnss_Signal> available_GLO_2G_signals_;
-    std::list<Gnss_Signal> available_BDS_B1_signals_;
-    std::list<Gnss_Signal> available_BDS_B3_signals_;
+    std::unordered_map<std::string, std::list<Gnss_Signal>> available_signals_map_;
 
     enum StringValue
     {
@@ -271,7 +261,9 @@ private:
         evGLO_1G,
         evGLO_2G,
         evBDS_B1,
-        evBDS_B3
+        evBDS_B3,
+        evQZS_J1,
+        evQZS_J5
     };
     std::map<std::string, StringValue> mapStringValues_;
 

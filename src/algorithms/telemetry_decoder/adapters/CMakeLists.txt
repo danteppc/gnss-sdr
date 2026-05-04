@@ -6,6 +6,7 @@
 
 
 set(TELEMETRY_DECODER_ADAPTER_SOURCES
+    telemetry_decoder_adapter_base.cc
     gps_l1_ca_telemetry_decoder.cc
     gps_l2c_telemetry_decoder.cc
     gps_l5_telemetry_decoder.cc
@@ -18,9 +19,12 @@ set(TELEMETRY_DECODER_ADAPTER_SOURCES
     glonass_l2_ca_telemetry_decoder.cc
     beidou_b1i_telemetry_decoder.cc
     beidou_b3i_telemetry_decoder.cc
+    qzss_l1_telemetry_decoder.cc
+    qzss_l5_telemetry_decoder.cc
 )
 
 set(TELEMETRY_DECODER_ADAPTER_HEADERS
+    telemetry_decoder_adapter_base.h
     gps_l1_ca_telemetry_decoder.h
     gps_l2c_telemetry_decoder.h
     gps_l5_telemetry_decoder.h
@@ -33,6 +37,8 @@ set(TELEMETRY_DECODER_ADAPTER_HEADERS
     glonass_l2_ca_telemetry_decoder.h
     beidou_b1i_telemetry_decoder.h
     beidou_b3i_telemetry_decoder.h
+    qzss_l1_telemetry_decoder.h
+    qzss_l5_telemetry_decoder.h
 )
 
 list(SORT TELEMETRY_DECODER_ADAPTER_HEADERS)

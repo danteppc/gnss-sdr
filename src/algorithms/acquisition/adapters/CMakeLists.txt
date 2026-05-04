@@ -6,6 +6,8 @@
 
 
 set(ACQ_ADAPTER_SOURCES
+    base_pcps_acquisition.cc
+    base_pcps_acquisition_custom.cc
     gps_l1_ca_pcps_acquisition.cc
     gps_l1_ca_pcps_assisted_acquisition.cc
     gps_l1_ca_pcps_acquisition_fine_doppler.cc
@@ -26,9 +28,13 @@ set(ACQ_ADAPTER_SOURCES
     glonass_l2_ca_pcps_acquisition.cc
     beidou_b1i_pcps_acquisition.cc
     beidou_b3i_pcps_acquisition.cc
+    qzss_l1_pcps_acquisition.cc
+    qzss_l5i_pcps_acquisition.cc
 )
 
 set(ACQ_ADAPTER_HEADERS
+    base_pcps_acquisition.h
+    base_pcps_acquisition_custom.h
     gps_l1_ca_pcps_acquisition.h
     gps_l1_ca_pcps_assisted_acquisition.h
     gps_l1_ca_pcps_acquisition_fine_doppler.h
@@ -49,10 +55,13 @@ set(ACQ_ADAPTER_HEADERS
     glonass_l2_ca_pcps_acquisition.h
     beidou_b1i_pcps_acquisition.h
     beidou_b3i_pcps_acquisition.h
+    qzss_l1_pcps_acquisition.h
+    qzss_l5i_pcps_acquisition.h
 )
 
 if(ENABLE_FPGA)
     set(ACQ_ADAPTER_SOURCES ${ACQ_ADAPTER_SOURCES}
+        base_pcps_acquisition_fpga.cc
         gps_l1_ca_pcps_acquisition_fpga.cc
         gps_l2_m_pcps_acquisition_fpga.cc
         galileo_e1_pcps_ambiguous_acquisition_fpga.cc
@@ -61,6 +70,7 @@ if(ENABLE_FPGA)
         gps_l5i_pcps_acquisition_fpga.cc
     )
     set(ACQ_ADAPTER_HEADERS ${ACQ_ADAPTER_HEADERS}
+        base_pcps_acquisition_fpga.h
         gps_l1_ca_pcps_acquisition_fpga.h
         gps_l2_m_pcps_acquisition_fpga.h
         galileo_e1_pcps_ambiguous_acquisition_fpga.h

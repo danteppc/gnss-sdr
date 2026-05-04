@@ -33,10 +33,9 @@
 #include "rtklib_solver.h"
 #include "Beidou_DNAV.h"
 #include "gnss_sdr_filesystem.h"
+#include "matlab_writter_helper.h"
 #include "rtklib_rtkpos.h"
-#include "rtklib_solution.h"
-#include <matio.h>
-#include <algorithm>
+#include "signal_enabled_flags.h"
 #include <cmath>
 #include <exception>
 #include <utility>
@@ -51,12 +50,12 @@
 Rtklib_Solver::Rtklib_Solver(const rtk_t &rtk,
     const Pvt_Conf &conf,
     const std::string &dump_filename,
-    uint32_t type_of_rx,
+    uint32_t signal_enabled_flags,
     bool flag_dump_to_file,
     bool flag_dump_to_mat) : d_dump_filename(dump_filename),
                              d_rtk(rtk),
                              d_conf(conf),
-                             d_type_of_rx(type_of_rx),
+                             d_signal_enabled_flags(signal_enabled_flags),
                              d_flag_dump_enabled(flag_dump_to_file),
                              d_flag_dump_mat_enabled(flag_dump_to_mat)
 {
@@ -77,66 +76,61 @@ Rtklib_Solver::Rtklib_Solver(const rtk_t &rtk,
     d_rtklib_band_index["5X"] = 2;
     d_rtklib_band_index["L5"] = 2;
     d_rtklib_band_index["E6"] = 0;
+    d_rtklib_band_index["J1"] = 0;
+    d_rtklib_band_index["J5"] = 2;
 
-    switch (d_type_of_rx)
+    const Signal_Enabled_Flags flags(d_signal_enabled_flags);
+
+    if (flags.check_only_enabled(GAL_E5b) ||
+        flags.check_only_enabled(GPS_1C, GAL_E5b) ||
+        flags.check_only_enabled(GAL_1B, GAL_E5b) ||
+        flags.check_only_enabled(GPS_2S, GAL_E5b))
         {
-        case 6:  // E5b only
             d_rtklib_freq_index[2] = 4;
-            break;
-        case 11:  // GPS L1 C/A + Galileo E5b
-            d_rtklib_freq_index[2] = 4;
-            break;
-        case 15:  // Galileo E1B + Galileo E5b
-            d_rtklib_freq_index[2] = 4;
-            break;
-        case 18:  // GPS L2C + Galileo E5b
-            d_rtklib_freq_index[2] = 4;
-            break;
-        case 19:  // Galileo E5a + Galileo E5b
+        }
+    else if (flags.check_only_enabled(GAL_E5a, GAL_E5b))
+        {
             d_rtklib_band_index["5X"] = 0;
             d_rtklib_freq_index[0] = 2;
             d_rtklib_freq_index[2] = 4;
-            break;
-        case 20:  // GPS L5 + Galileo E5b
+        }
+    else if (flags.check_only_enabled(GPS_L5, GAL_E5b))
+        {
             d_rtklib_band_index["L5"] = 0;
             d_rtklib_freq_index[0] = 2;
             d_rtklib_freq_index[2] = 4;
-            break;
-        case 100:  // E6B only
+        }
+    else if (flags.check_only_enabled(GAL_E6))
+        {
             d_rtklib_freq_index[0] = 3;
-            break;
-        case 101:  // E1 + E6B
+        }
+    else if (flags.check_only_enabled(GAL_1B, GAL_E6) ||
+             flags.check_only_enabled(GAL_E5a, GAL_E6) ||
+             flags.check_only_enabled(GAL_1B, GAL_E5a, GAL_E6))
+        {
             d_rtklib_band_index["E6"] = 1;
             d_rtklib_freq_index[1] = 3;
-            break;
-        case 102:  // E5a + E6B
-            d_rtklib_band_index["E6"] = 1;
-            d_rtklib_freq_index[1] = 3;
-            break;
-        case 103:  // E5b + E6B
+        }
+    else if (flags.check_only_enabled(GAL_E5b, GAL_E6) ||
+             flags.check_only_enabled(GAL_1B, GAL_E5b, GAL_E6))
+        {
             d_rtklib_band_index["E6"] = 1;
             d_rtklib_freq_index[1] = 3;
             d_rtklib_freq_index[2] = 4;
-            break;
-        case 104:  // Galileo E1B + Galileo E5a + Galileo E6B
+        }
+    else if (flags.check_only_enabled(GAL_1B, GAL_E5a, GAL_E6) ||
+             flags.check_only_enabled(GPS_1C, GAL_1B, GAL_E6) ||
+             flags.check_only_enabled(GPS_1C, GAL_E6))
+        {
             d_rtklib_band_index["E6"] = 1;
             d_rtklib_freq_index[1] = 3;
-            break;
-        case 105:  // Galileo E1B + Galileo E5b + Galileo E6B
-            d_rtklib_freq_index[2] = 4;
-            d_rtklib_band_index["E6"] = 1;
-            d_rtklib_freq_index[1] = 3;
-            break;
-        case 106:  // GPS L1 C/A + Galileo E1B + Galileo E6B
-        case 107:  // GPS L1 C/A + Galileo E6B
-            d_rtklib_band_index["E6"] = 1;
-            d_rtklib_freq_index[1] = 3;
-            break;
-        case 108:  // GPS L1 C/A + Galileo E1B + GPS L5 + Galileo E5a + Galileo E6B
+        }
+    else if (flags.check_only_enabled(GPS_1C, GAL_1B, GPS_L5, GAL_E5a, GAL_E5b))
+        {
             d_rtklib_band_index["E6"] = 2;
             d_rtklib_freq_index[2] = 3;
-            break;
         }
+
     // auto empty_map = std::map < int, HAS_obs_corrections >> ();
     // d_has_obs_corr_map["L1 C/A"] = empty_map;
 
@@ -309,126 +303,41 @@ bool Rtklib_Solver::save_matfile() const
         }
 
     // WRITE MAT FILE
-    mat_t *matfp;
-    matvar_t *matvar;
     std::string filename = dump_filename;
     filename.erase(filename.length() - 4, 4);
     filename.append(".mat");
-    matfp = Mat_CreateVer(filename.c_str(), nullptr, MAT_FT_MAT73);
+    mat_t *matfp = Mat_CreateVer(filename.c_str(), nullptr, MAT_FT_MAT73);
     if (reinterpret_cast<int64_t *>(matfp) != nullptr)
         {
             std::array<size_t, 2> dims{1, static_cast<size_t>(num_epoch)};
-            matvar = Mat_VarCreate("TOW_at_current_symbol_ms", MAT_C_UINT32, MAT_T_UINT32, 2, dims.data(), TOW_at_current_symbol_ms.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("week", MAT_C_UINT32, MAT_T_UINT32, 2, dims.data(), week.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("RX_time", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), RX_time.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("user_clk_offset", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), user_clk_offset.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("pos_x", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), pos_x.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("pos_y", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), pos_y.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("pos_z", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), pos_z.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("vel_x", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), vel_x.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("vel_y", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), vel_y.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("vel_z", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), vel_z.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("cov_xx", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), cov_xx.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("cov_yy", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), cov_yy.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("cov_zz", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), cov_zz.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("cov_xy", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), cov_xy.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("cov_yz", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), cov_yz.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("cov_zx", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), cov_zx.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("latitude", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), latitude.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("longitude", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), longitude.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("height", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), height.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("valid_sats", MAT_C_UINT8, MAT_T_UINT8, 2, dims.data(), valid_sats.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("solution_status", MAT_C_UINT8, MAT_T_UINT8, 2, dims.data(), solution_status.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("solution_type", MAT_C_UINT8, MAT_T_UINT8, 2, dims.data(), solution_type.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("AR_ratio_factor", MAT_C_SINGLE, MAT_T_SINGLE, 2, dims.data(), AR_ratio_factor.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("AR_ratio_threshold", MAT_C_SINGLE, MAT_T_SINGLE, 2, dims.data(), AR_ratio_threshold.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("gdop", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), gdop.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("pdop", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), pdop.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("hdop", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), hdop.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
-
-            matvar = Mat_VarCreate("vdop", MAT_C_DOUBLE, MAT_T_DOUBLE, 2, dims.data(), vdop.data(), 0);
-            Mat_VarWrite(matfp, matvar, MAT_COMPRESSION_ZLIB);  // or MAT_COMPRESSION_NONE
-            Mat_VarFree(matvar);
+            write_matlab_var<2>("TOW_at_current_symbol_ms", TOW_at_current_symbol_ms.data(), matfp, dims);
+            write_matlab_var<2>("week", week.data(), matfp, dims);
+            write_matlab_var<2>("RX_time", RX_time.data(), matfp, dims);
+            write_matlab_var<2>("user_clk_offset", user_clk_offset.data(), matfp, dims);
+            write_matlab_var<2>("pos_x", pos_x.data(), matfp, dims);
+            write_matlab_var<2>("pos_y", pos_y.data(), matfp, dims);
+            write_matlab_var<2>("pos_z", pos_z.data(), matfp, dims);
+            write_matlab_var<2>("vel_x", vel_x.data(), matfp, dims);
+            write_matlab_var<2>("vel_y", vel_y.data(), matfp, dims);
+            write_matlab_var<2>("vel_z", vel_z.data(), matfp, dims);
+            write_matlab_var<2>("cov_xx", cov_xx.data(), matfp, dims);
+            write_matlab_var<2>("cov_yy", cov_yy.data(), matfp, dims);
+            write_matlab_var<2>("cov_zz", cov_zz.data(), matfp, dims);
+            write_matlab_var<2>("cov_xy", cov_xy.data(), matfp, dims);
+            write_matlab_var<2>("cov_yz", cov_yz.data(), matfp, dims);
+            write_matlab_var<2>("cov_zx", cov_zx.data(), matfp, dims);
+            write_matlab_var<2>("latitude", latitude.data(), matfp, dims);
+            write_matlab_var<2>("longitude", longitude.data(), matfp, dims);
+            write_matlab_var<2>("height", height.data(), matfp, dims);
+            write_matlab_var<2>("valid_sats", valid_sats.data(), matfp, dims);
+            write_matlab_var<2>("solution_status", solution_status.data(), matfp, dims);
+            write_matlab_var<2>("solution_type", solution_type.data(), matfp, dims);
+            write_matlab_var<2>("AR_ratio_factor", AR_ratio_factor.data(), matfp, dims);
+            write_matlab_var<2>("AR_ratio_threshold", AR_ratio_threshold.data(), matfp, dims);
+            write_matlab_var<2>("gdop", gdop.data(), matfp, dims);
+            write_matlab_var<2>("pdop", pdop.data(), matfp, dims);
+            write_matlab_var<2>("hdop", hdop.data(), matfp, dims);
+            write_matlab_var<2>("vdop", vdop.data(), matfp, dims);
         }
 
     Mat_Close(matfp);
@@ -906,7 +815,7 @@ void Rtklib_Solver::get_current_has_obs_correction(const std::string &signal, ui
 }
 
 
-bool Rtklib_Solver::get_PVT(const std::map<int, Gnss_Synchro> &gnss_observables_map, double kf_update_interval_s)
+bool Rtklib_Solver::get_PVT(const std::map<int, Gnss_Synchro> &gnss_observables_map, double kf_update_interval_s, const SensorDataAggregator &sensor_data_aggregator)
 {
     std::map<int, Gnss_Synchro>::const_iterator gnss_observables_iter;
     std::map<int, Galileo_Ephemeris>::const_iterator galileo_ephemeris_iter;
@@ -926,40 +835,6 @@ bool Rtklib_Solver::get_PVT(const std::map<int, Gnss_Synchro> &gnss_observables_
     d_obs_data.fill({});
     std::vector<eph_t> eph_data(MAXOBS);
     std::vector<geph_t> geph_data(MAXOBS);
-
-    // Workaround for NAV/CNAV clash problem
-    bool gps_dual_band = false;
-    bool band1 = false;
-    bool band2 = false;
-
-    for (gnss_observables_iter = gnss_observables_map.cbegin();
-        gnss_observables_iter != gnss_observables_map.cend();
-        ++gnss_observables_iter)
-        {
-            switch (gnss_observables_iter->second.System)
-                {
-                case 'G':
-                    {
-                        const std::string sig_(gnss_observables_iter->second.Signal, 2);
-                        if (sig_ == "1C")
-                            {
-                                band1 = true;
-                            }
-                        if (sig_ == "2S")
-                            {
-                                band2 = true;
-                            }
-                    }
-                    break;
-                default:
-                    {
-                    }
-                }
-        }
-    if (band1 == true and band2 == true)
-        {
-            gps_dual_band = true;
-        }
 
     for (gnss_observables_iter = gnss_observables_map.cbegin();
         gnss_observables_iter != gnss_observables_map.cend();
@@ -1131,20 +1006,28 @@ bool Rtklib_Solver::get_PVT(const std::map<int, Gnss_Synchro> &gnss_observables_
                         break;
                     }
                 case 'G':
+                case 'J':
                     {
-                        // GPS L1
-                        // 1 GPS - find the ephemeris for the current GPS SV observation. The SV PRN ID is the map key
-                        const std::string gps_str("GPS");
+                        const bool is_qzss = (gnss_observables_iter->second.PRN >= 193 && gnss_observables_iter->second.PRN <= 203);
+                        // GPS/QZSS L1
+                        // find the ephemeris for the current SV observation. The SV PRN ID is the map key
+                        const std::string gnss_str = is_qzss ? "QZSS" : "GPS";
+                        const int sat_sys = is_qzss ? SYS_QZS : SYS_GPS;
+                        const int sat = satno(sat_sys, gnss_observables_iter->second.PRN);
                         const std::string sig_(gnss_observables_iter->second.Signal, 2);
-                        if (sig_ == "1C")
+                        const bool is_l1_ca = (sig_ == "1C") || (sig_ == "J1");
+                        const bool is_l2 = (sig_ == "2S");
+                        const bool is_l5 = (sig_ == "L5") || (sig_ == "J5");
+                        const std::string rtklib_sig = is_qzss ? (is_l1_ca ? "J1" : (is_l5 ? "J5" : sig_)) : sig_;
+                        if (is_l1_ca)
                             {
                                 gps_ephemeris_iter = gps_ephemeris_map.find(gnss_observables_iter->second.PRN);
                                 if (gps_ephemeris_iter != gps_ephemeris_map.cend())
                                     {
                                         // convert ephemeris from GNSS-SDR class to RTKLIB structure
                                         eph_data[valid_obs] = eph_to_rtklib(gps_ephemeris_iter->second,
-                                            this->d_has_orbit_corrections_store_map[gps_str],
-                                            this->d_has_clock_corrections_store_map[gps_str],
+                                            this->d_has_orbit_corrections_store_map[gnss_str],
+                                            this->d_has_clock_corrections_store_map[gnss_str],
                                             this->is_pre_2009());
                                         // convert observation from GNSS-SDR class to RTKLIB structure
                                         obsd_t newobs{};
@@ -1152,7 +1035,7 @@ bool Rtklib_Solver::get_PVT(const std::map<int, Gnss_Synchro> &gnss_observables_
                                             gnss_observables_iter->second,
                                             d_has_obs_corr_map,
                                             gps_ephemeris_iter->second.WN,
-                                            d_rtklib_band_index[sig_],
+                                            d_rtklib_band_index[rtklib_sig],
                                             this->is_pre_2009());
                                         valid_obs++;
                                     }
@@ -1161,83 +1044,30 @@ bool Rtklib_Solver::get_PVT(const std::map<int, Gnss_Synchro> &gnss_observables_
                                         DLOG(INFO) << "No ephemeris data for SV " << gnss_observables_iter->first;
                                     }
                             }
-                        // GPS L2 (todo: solve NAV/CNAV clash)
-                        if ((sig_ == "2S") and (gps_dual_band == false))
+                        if (is_l2 || is_l5)
                             {
                                 gps_cnav_ephemeris_iter = gps_cnav_ephemeris_map.find(gnss_observables_iter->second.PRN);
                                 if (gps_cnav_ephemeris_iter != gps_cnav_ephemeris_map.cend())
                                     {
-                                        // 1. Find the same satellite in GPS L1 band
-                                        gps_ephemeris_iter = gps_ephemeris_map.find(gnss_observables_iter->second.PRN);
-                                        if (gps_ephemeris_iter != gps_ephemeris_map.cend())
+                                        // 1. Find the same satellite in current GPS/QZSS observations (typically L1)
+                                        bool found_existing_obs = false;
+                                        for (int i = 0; i < valid_obs; i++)
                                             {
-                                                /* By the moment, GPS L2 observables are not used in pseudorange computations if GPS L1 is available
-                                                // 2. If found, replace the existing GPS L1 ephemeris with the GPS L2 ephemeris
-                                                // (more precise!), and attach the L2 observation to the L1 observation in RTKLIB structure
-                                                for (int i = 0; i < valid_obs; i++)
+                                                if (eph_data[i].sat == sat)
                                                     {
-                                                        if (eph_data[i].sat == static_cast<int>(gnss_observables_iter->second.PRN))
-                                                            {
-                                                                eph_data[i] = eph_to_rtklib(gps_cnav_ephemeris_iter->second);
-                                                                d_obs_data[i + glo_valid_obs] = insert_obs_to_rtklib(d_obs_data[i + glo_valid_obs],
-                                                                    gnss_observables_iter->second,
-                                                                    eph_data[i].week,
-                                                                    d_rtklib_band_index[sig_]);
-                                                                break;
-                                                            }
-                                                    }
-                                                */
-                                            }
-                                        else
-                                            {
-                                                // 3. If not found, insert the GPS L2 ephemeris and the observation
-                                                // convert ephemeris from GNSS-SDR class to RTKLIB structure
-                                                eph_data[valid_obs] = eph_to_rtklib(gps_cnav_ephemeris_iter->second);
-                                                // convert observation from GNSS-SDR class to RTKLIB structure
-                                                const auto default_code_ = static_cast<unsigned char>(CODE_NONE);
-                                                obsd_t newobs = {{0, 0}, '0', '0', {}, {},
-                                                    {default_code_, default_code_, default_code_},
-                                                    {}, {0.0, 0.0, 0.0}, {}};
-                                                d_obs_data[valid_obs + glo_valid_obs] = insert_obs_to_rtklib(newobs,
-                                                    gnss_observables_iter->second,
-                                                    gps_cnav_ephemeris_iter->second.WN,
-                                                    d_rtklib_band_index[sig_]);
-                                                valid_obs++;
-                                            }
-                                    }
-                                else  // the ephemeris are not available for this SV
-                                    {
-                                        DLOG(INFO) << "No ephemeris data for SV " << gnss_observables_iter->second.PRN;
-                                    }
-                            }
-                        // GPS L5
-                        if (sig_ == "L5")
-                            {
-                                gps_cnav_ephemeris_iter = gps_cnav_ephemeris_map.find(gnss_observables_iter->second.PRN);
-                                if (gps_cnav_ephemeris_iter != gps_cnav_ephemeris_map.cend())
-                                    {
-                                        // 1. Find the same satellite in GPS L1 band
-                                        gps_ephemeris_iter = gps_ephemeris_map.find(gnss_observables_iter->second.PRN);
-                                        if (gps_ephemeris_iter != gps_ephemeris_map.cend())
-                                            {
-                                                // 2. If found, replace the existing GPS L1 ephemeris with the GPS L5 ephemeris
-                                                // (more precise!), and attach the L5 observation to the L1 observation in RTKLIB structure
-                                                for (int i = 0; i < valid_obs; i++)
-                                                    {
-                                                        if (eph_data[i].sat == static_cast<int>(gnss_observables_iter->second.PRN))
-                                                            {
-                                                                eph_data[i] = eph_to_rtklib(gps_cnav_ephemeris_iter->second);
-                                                                d_obs_data[i + glo_valid_obs] = insert_obs_to_rtklib(d_obs_data[i],
-                                                                    gnss_observables_iter->second,
-                                                                    gps_cnav_ephemeris_iter->second.WN,
-                                                                    d_rtklib_band_index[sig_]);
-                                                                break;
-                                                            }
+                                                        // 2. If found, attach the L2/L5 observation to the existing observation in RTKLIB structure
+                                                        d_obs_data[i + glo_valid_obs] = insert_obs_to_rtklib(d_obs_data[i + glo_valid_obs],
+                                                            gnss_observables_iter->second,
+                                                            d_has_obs_corr_map,
+                                                            gps_cnav_ephemeris_iter->second.WN,
+                                                            d_rtklib_band_index[rtklib_sig]);
+                                                        found_existing_obs = true;
+                                                        break;
                                                     }
                                             }
-                                        else
+                                        if (!found_existing_obs)
                                             {
-                                                // 3. If not found, insert the GPS L5 ephemeris and the observation
+                                                // 3. If not found, insert the L2/L5 ephemeris and the observation
                                                 // convert ephemeris from GNSS-SDR class to RTKLIB structure
                                                 eph_data[valid_obs] = eph_to_rtklib(gps_cnav_ephemeris_iter->second);
                                                 // convert observation from GNSS-SDR class to RTKLIB structure
@@ -1249,7 +1079,7 @@ bool Rtklib_Solver::get_PVT(const std::map<int, Gnss_Synchro> &gnss_observables_
                                                     gnss_observables_iter->second,
                                                     d_has_obs_corr_map,
                                                     gps_cnav_ephemeris_iter->second.WN,
-                                                    d_rtklib_band_index[sig_]);
+                                                    d_rtklib_band_index[rtklib_sig]);
                                                 valid_obs++;
                                             }
                                     }
@@ -1260,7 +1090,7 @@ bool Rtklib_Solver::get_PVT(const std::map<int, Gnss_Synchro> &gnss_observables_
                             }
                         break;
                     }
-                case 'R':  // TODO This should be using rtk lib nomenclature
+                case 'R':
                     {
                         const std::string sig_(gnss_observables_iter->second.Signal);
                         // GLONASS GNAV L1
@@ -1552,11 +1382,18 @@ bool Rtklib_Solver::get_PVT(const std::map<int, Gnss_Synchro> &gnss_observables_
 
                     if (d_conf.enable_pvt_kf == true)
                         {
+                            arma::vec p = {pvt_sol.rr[0], pvt_sol.rr[1], pvt_sol.rr[2]};
+                            arma::vec v = {pvt_sol.rr[3], pvt_sol.rr[4], pvt_sol.rr[5]};
+                            if (d_conf.kf_use_imu_vel)
+                                {
+                                    v = {
+                                        sensor_data_aggregator.get_last_f32(SensorIdentifier::IMU_VEL_X).value,
+                                        sensor_data_aggregator.get_last_f32(SensorIdentifier::IMU_VEL_Y).value,
+                                        sensor_data_aggregator.get_last_f32(SensorIdentifier::IMU_VEL_Z).value};
+                                }
+
                             if (d_pvt_kf.is_initialized() == false)
                                 {
-                                    arma::vec p = {pvt_sol.rr[0], pvt_sol.rr[1], pvt_sol.rr[2]};
-                                    arma::vec v = {pvt_sol.rr[3], pvt_sol.rr[4], pvt_sol.rr[5]};
-
                                     d_pvt_kf.init_Kf(p,
                                         v,
                                         kf_update_interval_s,
@@ -1567,8 +1404,6 @@ bool Rtklib_Solver::get_PVT(const std::map<int, Gnss_Synchro> &gnss_observables_
                                 }
                             else
                                 {
-                                    arma::vec p = {pvt_sol.rr[0], pvt_sol.rr[1], pvt_sol.rr[2]};
-                                    arma::vec v = {pvt_sol.rr[3], pvt_sol.rr[4], pvt_sol.rr[5]};
                                     d_pvt_kf.run_Kf(p, v);
                                     d_pvt_kf.get_pv_Kf(p, v);
                                     pvt_sol.rr[0] = p[0];  // [m]

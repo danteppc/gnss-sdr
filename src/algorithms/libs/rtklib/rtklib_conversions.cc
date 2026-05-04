@@ -43,6 +43,7 @@ obsd_t insert_obs_to_rtklib(obsd_t& rtklib_obs,
     rtklib_obs.D[band] = gnss_synchro.Carrier_Doppler_hz;
     rtklib_obs.P[band] = gnss_synchro.Pseudorange_m;
     rtklib_obs.L[band] = gnss_synchro.Carrier_phase_rads / TWO_PI;
+    rtklib_obs.LLI[band] = gnss_synchro.Flag_cycle_slip ? 1U : 0U;
 
     switch (band)
         {
@@ -99,6 +100,9 @@ obsd_t insert_obs_to_rtklib(obsd_t& rtklib_obs,
                     rtklib_obs.code[band] = static_cast<unsigned char>(CODE_L6I);
                 }
 
+            break;
+        case 'J':
+            rtklib_obs.sat = satno(SYS_QZS, gnss_synchro.PRN);
             break;
 
         default:
@@ -553,7 +557,8 @@ eph_t eph_to_rtklib(const Gps_Ephemeris& gps_eph,
 {
     eph_t rtklib_sat = {0, 0, 0, 0, 0, 0, 0, 0, {0, 0}, {0, 0}, {0, 0}, 0.0, 0.0, 0.0, 0.0, 0.0,
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, {}, {}, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false};
-    rtklib_sat.sat = gps_eph.PRN;
+    const int gps_sys = (MINPRNQZS <= gps_eph.PRN && gps_eph.PRN <= MAXPRNQZS) ? SYS_QZS : SYS_GPS;
+    rtklib_sat.sat = satno(gps_sys, gps_eph.PRN);
     rtklib_sat.A = gps_eph.sqrtA * gps_eph.sqrtA;
     rtklib_sat.M0 = gps_eph.M_0;
     rtklib_sat.deln = gps_eph.delta_n;
@@ -720,7 +725,8 @@ eph_t eph_to_rtklib(const Gps_CNAV_Ephemeris& gps_cnav_eph)
 {
     eph_t rtklib_sat = {0, 0, 0, 0, 0, 0, 0, 0, {0, 0}, {0, 0}, {0, 0}, 0.0, 0.0, 0.0, 0.0, 0.0,
         0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, {}, {}, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, false};
-    rtklib_sat.sat = gps_cnav_eph.PRN;
+    const int gps_sys = (MINPRNQZS <= gps_cnav_eph.PRN && gps_cnav_eph.PRN <= MAXPRNQZS) ? SYS_QZS : SYS_GPS;
+    rtklib_sat.sat = satno(gps_sys, gps_cnav_eph.PRN);
     rtklib_sat.A = gps_cnav_eph.sqrtA * gps_cnav_eph.sqrtA;
     rtklib_sat.M0 = gps_cnav_eph.M_0;
     rtklib_sat.deln = gps_cnav_eph.delta_n;

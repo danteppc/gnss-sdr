@@ -23,6 +23,8 @@
 #include "gnss_time.h"
 #include "osnma_data.h"
 #include "rtklib.h"
+#include "sensor_data/sensor_data_aggregator.h"
+#include "sensor_data/sensor_data_source_configuration.h"
 #include <boost/date_time/gregorian/gregorian.hpp>
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/interprocess/ipc/message_queue.hpp>
@@ -74,7 +76,8 @@ using rtklib_pvt_gs_sptr = gnss_shared_ptr<rtklib_pvt_gs>;
 
 rtklib_pvt_gs_sptr rtklib_make_pvt_gs(uint32_t nchannels,
     const Pvt_Conf& conf_,
-    const rtk_t& rtk);
+    const rtk_t& rtk,
+    const SensorDataSourceConfiguration& sensor_data_configuration);
 
 /*!
  * \brief This class implements a block that computes the PVT solution using the RTKLIB integrated library
@@ -135,11 +138,13 @@ public:
 private:
     friend rtklib_pvt_gs_sptr rtklib_make_pvt_gs(uint32_t nchannels,
         const Pvt_Conf& conf_,
-        const rtk_t& rtk);
+        const rtk_t& rtk,
+        const SensorDataSourceConfiguration& sensor_data_configuration);
 
     rtklib_pvt_gs(uint32_t nchannels,
         const Pvt_Conf& conf_,
-        const rtk_t& rtk);
+        const rtk_t& rtk,
+        const SensorDataSourceConfiguration& sensor_data_configuration);
 
     void log_source_timetag_info(double RX_time_ns, double TAG_time_ns);
 
@@ -173,6 +178,8 @@ private:
 
     std::fstream d_log_timetag_file;
 
+    std::unique_ptr<SensorDataAggregator> d_sensor_data_aggregator;
+
     std::shared_ptr<Rtklib_Solver> d_internal_pvt_solver;
     std::shared_ptr<Rtklib_Solver> d_user_pvt_solver;
 
@@ -192,7 +199,7 @@ private:
     std::chrono::time_point<std::chrono::system_clock> d_start;
     std::chrono::time_point<std::chrono::system_clock> d_end;
 
-    std::string d_queue_name;
+    const std::string d_queue_name;
     std::string d_dump_filename;
     std::string d_xml_base_path;
     std::string d_local_time_str;
@@ -208,35 +215,35 @@ private:
     std::queue<GnssTime> d_TimeChannelTagTimestamps;
 
     boost::posix_time::time_duration d_utc_diff_time;
-    std::unique_ptr<Geohash> d_geohash;
+    const std::unique_ptr<Geohash> d_geohash;
 
-    size_t d_gps_ephemeris_sptr_type_hash_code;
-    size_t d_gps_iono_sptr_type_hash_code;
-    size_t d_gps_utc_model_sptr_type_hash_code;
-    size_t d_gps_cnav_ephemeris_sptr_type_hash_code;
-    size_t d_gps_cnav_iono_sptr_type_hash_code;
-    size_t d_gps_cnav_utc_model_sptr_type_hash_code;
-    size_t d_gps_almanac_sptr_type_hash_code;
-    size_t d_galileo_ephemeris_sptr_type_hash_code;
-    size_t d_galileo_iono_sptr_type_hash_code;
-    size_t d_galileo_utc_model_sptr_type_hash_code;
-    size_t d_galileo_almanac_helper_sptr_type_hash_code;
-    size_t d_galileo_almanac_sptr_type_hash_code;
-    size_t d_glonass_gnav_ephemeris_sptr_type_hash_code;
-    size_t d_glonass_gnav_utc_model_sptr_type_hash_code;
-    size_t d_glonass_gnav_almanac_sptr_type_hash_code;
-    size_t d_beidou_dnav_ephemeris_sptr_type_hash_code;
-    size_t d_beidou_dnav_iono_sptr_type_hash_code;
-    size_t d_beidou_dnav_utc_model_sptr_type_hash_code;
-    size_t d_beidou_dnav_almanac_sptr_type_hash_code;
-    size_t d_galileo_has_data_sptr_type_hash_code;
+    const size_t d_gps_ephemeris_sptr_type_hash_code;
+    const size_t d_gps_iono_sptr_type_hash_code;
+    const size_t d_gps_utc_model_sptr_type_hash_code;
+    const size_t d_gps_cnav_ephemeris_sptr_type_hash_code;
+    const size_t d_gps_cnav_iono_sptr_type_hash_code;
+    const size_t d_gps_cnav_utc_model_sptr_type_hash_code;
+    const size_t d_gps_almanac_sptr_type_hash_code;
+    const size_t d_galileo_ephemeris_sptr_type_hash_code;
+    const size_t d_galileo_iono_sptr_type_hash_code;
+    const size_t d_galileo_utc_model_sptr_type_hash_code;
+    const size_t d_galileo_almanac_helper_sptr_type_hash_code;
+    const size_t d_galileo_almanac_sptr_type_hash_code;
+    const size_t d_glonass_gnav_ephemeris_sptr_type_hash_code;
+    const size_t d_glonass_gnav_utc_model_sptr_type_hash_code;
+    const size_t d_glonass_gnav_almanac_sptr_type_hash_code;
+    const size_t d_beidou_dnav_ephemeris_sptr_type_hash_code;
+    const size_t d_beidou_dnav_iono_sptr_type_hash_code;
+    const size_t d_beidou_dnav_utc_model_sptr_type_hash_code;
+    const size_t d_beidou_dnav_almanac_sptr_type_hash_code;
+    const size_t d_galileo_has_data_sptr_type_hash_code;
 
-    double d_rinex_version;
+    const double d_rinex_version;
     double d_rx_time;
     uint64_t d_local_counter_ms;
     uint64_t d_timestamp_rx_clock_offset_correction_msg_ms;
 
-    int32_t d_rinexobs_rate_ms;
+    const int32_t d_rinexobs_rate_ms;
     int32_t d_rtcm_MT1045_rate_ms;  // Galileo Broadcast Ephemeris
     int32_t d_rtcm_MT1019_rate_ms;  // GPS Broadcast Ephemeris (orbits)
     int32_t d_rtcm_MT1020_rate_ms;  // GLONASS Broadcast Ephemeris (orbits)
@@ -244,24 +251,24 @@ private:
     int32_t d_rtcm_MT1087_rate_ms;  // GLONASS MSM7. The type 7 Multiple Signal Message format for the Russian GLONASS system
     int32_t d_rtcm_MT1097_rate_ms;  // Galileo MSM7. The type 7 Multiple Signal Message format for Europe’s Galileo system
     int32_t d_rtcm_MSM_rate_ms;
-    int32_t d_kml_rate_ms;
-    int32_t d_gpx_rate_ms;
-    int32_t d_geojson_rate_ms;
-    int32_t d_nmea_rate_ms;
-    int32_t d_an_rate_ms;
-    int32_t d_output_rate_ms;
-    int32_t d_display_rate_ms;
-    int32_t d_report_rate_ms;
-    int32_t d_max_obs_block_rx_clock_offset_ms;
+    const int32_t d_kml_rate_ms;
+    const int32_t d_gpx_rate_ms;
+    const int32_t d_geojson_rate_ms;
+    const int32_t d_nmea_rate_ms;
+    const int32_t d_an_rate_ms;
+    const int32_t d_output_rate_ms;
+    const int32_t d_display_rate_ms;
+    const int32_t d_report_rate_ms;
+    const int32_t d_max_obs_block_rx_clock_offset_ms;
 
-    uint32_t d_nchannels;
-    uint32_t d_type_of_rx;
-    uint32_t d_observable_interval_ms;
+    const uint32_t d_nchannels;
+    const uint32_t d_signal_enabled_flags;
+    const uint32_t d_observable_interval_ms;
     uint32_t d_pvt_errors_counter;
 
     bool d_dump;
-    bool d_dump_mat;
-    bool d_rinex_output_enabled;
+    const bool d_dump_mat;
+    const bool d_rinex_output_enabled;
     bool d_geojson_output_enabled;
     bool d_gpx_output_enabled;
     bool d_kml_output_enabled;
@@ -269,16 +276,16 @@ private:
     bool d_rtcm_enabled;
     bool d_first_fix;
     bool d_xml_storage;
-    bool d_flag_monitor_pvt_enabled;
-    bool d_flag_monitor_ephemeris_enabled;
-    bool d_show_local_time_zone;
-    bool d_enable_rx_clock_correction;
+    const bool d_flag_monitor_pvt_enabled;
+    const bool d_flag_monitor_ephemeris_enabled;
+    const bool d_show_local_time_zone;
+    const bool d_enable_rx_clock_correction;
     bool d_enable_has_messages;
-    bool d_an_printer_enabled;
+    const bool d_an_printer_enabled;
     bool d_log_timetag;
-    bool d_use_has_corrections;
-    bool d_use_unhealthy_sats;
-    bool d_osnma_strict;
+    const bool d_use_has_corrections;
+    const bool d_use_unhealthy_sats;
+    const bool d_osnma_strict;
 };
 
 

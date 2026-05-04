@@ -17,18 +17,11 @@
 #ifndef GNSS_SDR_SBAS_L1_TELEMETRY_DECODER_GS_H
 #define GNSS_SDR_SBAS_L1_TELEMETRY_DECODER_GS_H
 
-#include "gnss_block_interface.h"
-#include "gnss_satellite.h"
-#include <boost/crc.hpp>  // for crc_optimal
-#include <gnuradio/block.h>
+#include "telemetry_impl_interface.h"
+#include <boost/crc.hpp>     // for crc_optimal
 #include <gnuradio/types.h>  // for gr_vector_const_void_star
 #include <cstddef>           // for size_t
-#include <cstdint>
 #include <deque>
-#include <fstream>
-#include <memory>  // for std::shared_ptr
-#include <string>
-#include <utility>  // for pair
 #include <vector>
 
 /** \addtogroup Telemetry_Decoder
@@ -51,13 +44,13 @@ sbas_l1_telemetry_decoder_gs_sptr sbas_l1_make_telemetry_decoder_gs(
  * \brief This class implements a block that decodes the SBAS integrity and
  * corrections data defined in RTCA MOPS DO-229
  */
-class sbas_l1_telemetry_decoder_gs : public gr::block
+class sbas_l1_telemetry_decoder_gs : public telemetry_impl_interface
 {
 public:
     ~sbas_l1_telemetry_decoder_gs() override;
-    void set_satellite(const Gnss_Satellite &satellite);  //!< Set satellite PRN
-    void set_channel(int32_t channel);                    //!< Set receiver's channel
-    inline void reset() {};
+    void set_satellite(const Gnss_Satellite &satellite) override;  //!< Set satellite PRN
+    void set_channel(int32_t channel) override;                    //!< Set receiver's channel
+    inline void reset() override {};
 
     /*!
      * \brief This is where all signal processing takes place
