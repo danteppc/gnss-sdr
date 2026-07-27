@@ -164,8 +164,9 @@ void osnma_msg_receiver::msg_handler_osnma(const pmt::pmt_t& msg)
 
                     // Receiver time update
                     // Attack simulation: if any verified_bits > 80, inject time offset
-                    bool simulate_attack = false;
+                    bool simulate_attack = true;
                     uint32_t attack_trigger_sat = 0;
+                    //static uint32_t last_TOW = 0;
                     auto verified_data = d_nav_data_manager->get_verified_data();
                     LOG(INFO) << "Galileo OSNMA: get_verified_data() returned " << verified_data.size() << " entries";
                     for (const auto& nav_data : verified_data)
@@ -174,16 +175,12 @@ void osnma_msg_receiver::msg_handler_osnma(const pmt::pmt_t& msg)
                                       << ", TOW=" << nav_data.get_tow_sf0()
                                       << ", verified_bits=" << nav_data.get_verified_bits()
                                       << ", verified_status=" << nav_data.get_verified_status();
-                            if (nav_data.get_verified_bits() > 80)
-                                {
-                                    simulate_attack = true;
-                                    attack_trigger_sat = nav_data.get_prn_d();
-                                    break;
-                                }
+
                         }
-                    if (simulate_attack)
+                    if (nma_msg->TOW_sf0 % 120 == 0 && nma_msg->TOW_sf0 >= 408840 && simulate_attack)
                         {
-                            const int attack_parameter = -5;  // seconds to add
+                            //simulate_attack = false;  // only simulate attack once
+                            const int attack_parameter = -1;  // seconds to add
                             d_GST_SIS = d_helper->compute_gst(nma_msg->WN_sf0, nma_msg->TOW_sf0 + attack_parameter);
                             LOG(WARNING) << "Galileo OSNMA: ATTACK SIMULATION - Time offset injected (TOW+(" << attack_parameter << ")), triggered by PRNd=" << attack_trigger_sat;
                             std::cerr << "Galileo OSNMA: ATTACK SIMULATION - Time offset injected (TOW+(" << attack_parameter << ")), triggered by PRNd=" << attack_trigger_sat << std::endl;
@@ -216,6 +213,7 @@ void osnma_msg_receiver::msg_handler_osnma(const pmt::pmt_t& msg)
                     std::time_t delta_T = std::abs(static_cast<int64_t>((int64_t)d_GST_Rx - (int64_t)d_GST_SIS));
                     if (delta_T < d_T_L / 2)
                         {
+                            d_GST_SIS =  d_GST_Rx > d_GST_SIS ? d_GST_Rx: d_GST_SIS ; // resynchronize to SIS time if the difference is small, to avoid rejecting valid messages due to small clock offsets
                             d_tags_to_verify = {0, 4, 12};
                             LOG(INFO) << "Galileo OSNMA: time constraint OK (delta_T=" << delta_T << " s)";
                             std::cout << "Galileo OSNMA: time constraint OK (delta_T=" << delta_T << " s)" << std::endl;
@@ -407,8 +405,8 @@ void osnma_msg_receiver::process_osnma_message(const std::shared_ptr<OSNMA_msg>&
             LOG(INFO) << "Galileo OSNMA: TESLA parameters: GST_0=[" << d_osnma_data.d_dsm_kroot_message.wn_k << " "
                       << d_osnma_data.d_dsm_kroot_message.towh_k * 3600 << "], GST_Sf=" << d_helper->get_WN(d_GST_Sf) << " "
                       << d_helper->get_TOW(d_GST_Sf);
-            LOG(INFO) << ", d_GST_Sf" << d_GST_Sf << std::endl;
-            std::cout << ", d_GST_Sf" << d_GST_Sf << std::endl;
+            //LOG(INFO) << ", d_GST_Sf" << d_GST_Sf << std::endl;
+            //std::cout << ", d_GST_Sf" << d_GST_Sf << std::endl;
 
         }
     read_and_process_mack_block(osnma_msg);  // only process them if at least 3 available.

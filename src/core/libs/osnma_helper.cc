@@ -51,7 +51,7 @@ uint32_t Osnma_Helper::compute_gst(tm& input)
     return compute_gst(week_number, time_of_week);
 }
 
-
+/*
 uint32_t Osnma_Helper::compute_gst_now()
 {
     // GST epoch start: 22 August 1999, 00:00:00 UTC
@@ -69,8 +69,9 @@ uint32_t Osnma_Helper::compute_gst_now()
 
     return compute_gst(week_number, time_of_week);
 }
+*/
 
-/*
+
 uint32_t Osnma_Helper::compute_gst_now()
 {
     time_t now = time(nullptr);
@@ -85,7 +86,6 @@ uint32_t Osnma_Helper::compute_gst_now()
     return compute_gst(week_number, time_of_week);
 }
 
-*/
 std::vector<uint8_t> Osnma_Helper::gst_to_uint8(uint32_t GST) const
 {
     std::vector<uint8_t> res;

@@ -1631,10 +1631,10 @@ void rtklib_pvt_gs::msg_handler_osnma(const pmt::pmt_t& msg)
                     const auto osnma_data = wht::any_cast<std::shared_ptr<OSNMA_NavData>>(pmt::any_ref(msg));
                     if (osnma_data->get_reset_auth_map())
                         {
-                            // Clear all authenticated navigation data due to time constraint violation
+                            // Clear all authenticated navigation data due to OSNMA reset signal
                             d_auth_nav_data_map.clear();
-                            LOG(WARNING) << "PVT: Authentication map cleared due to OSNMA time constraint violation";
-                            std::cerr << "PVT: Authentication map cleared due to OSNMA time constraint violation" << std::endl;
+                            LOG(WARNING) << "PVT: Authentication map cleared due to OSNMA reset signal";
+                            std::cerr << "PVT: Authentication map cleared due to OSNMA reset signal" << std::endl;
                         }
                     else
                         {
